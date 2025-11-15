@@ -115,7 +115,7 @@ jobs:
       - name: Build KoniuBot.exe
         shell: pwsh
         run: |
-          pyinstaller --onefile --noconsole --name KoniuBot src/main.py
+          pyinstaller --onefile --noconsole --name KoniuBot src/main.py --add-data "assets/templates/dostepny_template.png;assets/templates" --add-data "assets/config/boss_farming.json;assets/config"
           New-Item -ItemType Directory -Force -Path build
           Copy-Item -Force "dist/KoniuBot.exe" "build/KoniuBot.exe"
 

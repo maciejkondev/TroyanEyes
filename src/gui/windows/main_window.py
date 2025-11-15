@@ -3,6 +3,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QStackedWidget
 )
 from PySide6.QtCore import Qt
+from gui.pages.main_page import MainPage
+from gui.pages.combat_page import CombatPage
+from gui.pages.settings_page import SettingsPage
+from gui.controllers.boss_farming import BossFarmingManager
 
 
 class MainWindow(QMainWindow):
@@ -10,7 +14,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("KoniuBot")
-        self.resize(600, 300)
+        self.resize(900, 600)
 
         # --- ROOT LAYOUT -------------------------------------------------
 
@@ -47,33 +51,28 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.stack.setObjectName("Content")
 
-        # PAGE PLACEHOLDERS — you will add these later
-        # -------------------------------------------------
-        # from gui.pages.main_page import MainPage
-        # from gui.pages.combat_page import CombatPage
-        # from gui.pages.exp_page import ExpPage
-        # from gui.pages.movement_page import MovementPage
-        # from gui.pages.settings_page import SettingsPage
-        #
-        # self.page_main = MainPage()
-        # self.page_combat = CombatPage()
-        # self.page_exp = ExpPage()
-        # self.page_movement = MovementPage()
-        # self.page_settings = SettingsPage()
-        #
-        # self.stack.addWidget(self.page_main)
-        # self.stack.addWidget(self.page_combat)
-        # self.stack.addWidget(self.page_exp)
-        # self.stack.addWidget(self.page_movement)
-        # self.stack.addWidget(self.page_settings)
-        # -------------------------------------------------
+        # Initialize farming manager for combat features
+        self.farming_manager = BossFarmingManager()
 
-        # TEMPORARY PLACEHOLDERS so the app runs NOW
-        # Remove these once you add real pages
-        for name in ["Main Page", "Combat Page", "EXP Farmer Page", "Movement Page", "Settings Page"]:
-            w = QWidget()
-            w.setObjectName(name)
-            self.stack.addWidget(w)
+        # PAGE INSTANCES
+        self.page_main = MainPage()
+        self.page_combat = CombatPage()
+        self.page_combat.set_farming_manager(self.farming_manager)
+        self.page_settings = SettingsPage()
+        self.page_settings.set_farming_manager(self.farming_manager)
+        
+        # TEMPORARY PLACEHOLDERS for EXP, Movement
+        self.page_exp = QWidget()
+        self.page_exp.setObjectName("EXP Farmer Page")
+        self.page_movement = QWidget()
+        self.page_movement.setObjectName("Movement Page")
+
+        # Add all pages to stack
+        self.stack.addWidget(self.page_main)
+        self.stack.addWidget(self.page_combat)
+        self.stack.addWidget(self.page_exp)
+        self.stack.addWidget(self.page_movement)
+        self.stack.addWidget(self.page_settings)
 
         # --- COMBINE SIDEBAR + STACK -------------------------------------
 
@@ -95,6 +94,13 @@ class MainWindow(QMainWindow):
 
         # OPTIONAL: load QSS theme
         # self.apply_dark_theme()
+
+    def closeEvent(self, event):
+        """Handle window close event to clean up resources."""
+        self.page_combat.cleanup()
+        if self.farming_manager:
+            self.farming_manager.cleanup()
+        event.accept()
 
     # ====================================================================
     # Helpers
