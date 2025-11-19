@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject
 class BossFarmingConfig:
     """Configuration manager skeleton."""
     
-    def __init__(self, config_path: str = ""):
+    def __init__(self):
         self.config = {"boss": {}, "metin": {}}
 
     def get_boss_config(self):
@@ -24,7 +24,7 @@ class BossFarmingConfig:
 class BossFarmingManager(QObject):
     """Manager skeleton."""
 
-    def __init__(self, config_path: str = ""):
+    def __init__(self):
         super().__init__()
         self.config_manager = BossFarmingConfig()
         self.boss_worker = None
