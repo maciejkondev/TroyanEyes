@@ -17,9 +17,7 @@ from gui.windows.main_window import MainWindow
 
 
 def main():
-    # Fix high DPI scaling on Windows (prevents blurry UI)
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
 
     app = QApplication(sys.argv)
 

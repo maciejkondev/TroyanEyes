@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from gui.pages.main_page import MainPage
 from gui.pages.combat_page import CombatPage
 from gui.pages.settings_page import SettingsPage
-from gui.controllers.boss_farming import BossFarmingManager
+
 
 
 class MainWindow(QMainWindow):
@@ -35,14 +35,12 @@ class MainWindow(QMainWindow):
         self.btn_main = self.create_nav_btn("Main")
         self.btn_combat = self.create_nav_btn("Combat")
         self.btn_exp = self.create_nav_btn("EXP Farmer")
-        self.btn_movement = self.create_nav_btn("Movement")
         self.btn_settings = self.create_nav_btn("Settings")
 
         # Add navigation buttons
         sidebar_layout.addWidget(self.btn_main)
         sidebar_layout.addWidget(self.btn_combat)
         sidebar_layout.addWidget(self.btn_exp)
-        sidebar_layout.addWidget(self.btn_movement)
         sidebar_layout.addWidget(self.btn_settings)
         sidebar_layout.addStretch()
 
@@ -51,27 +49,21 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.stack.setObjectName("Content")
 
-        # Initialize farming manager for combat features
-        self.farming_manager = BossFarmingManager()
+
 
         # PAGE INSTANCES
         self.page_main = MainPage()
         self.page_combat = CombatPage()
-        self.page_combat.set_farming_manager(self.farming_manager)
         self.page_settings = SettingsPage()
-        self.page_settings.set_farming_manager(self.farming_manager)
         
         # TEMPORARY PLACEHOLDERS for EXP, Movement
         self.page_exp = QWidget()
         self.page_exp.setObjectName("EXP Farmer Page")
-        self.page_movement = QWidget()
-        self.page_movement.setObjectName("Movement Page")
 
         # Add all pages to stack
         self.stack.addWidget(self.page_main)
         self.stack.addWidget(self.page_combat)
         self.stack.addWidget(self.page_exp)
-        self.stack.addWidget(self.page_movement)
         self.stack.addWidget(self.page_settings)
 
         # --- COMBINE SIDEBAR + STACK -------------------------------------
@@ -86,8 +78,7 @@ class MainWindow(QMainWindow):
         self.btn_main.clicked.connect(lambda: self.switch_page(0))
         self.btn_combat.clicked.connect(lambda: self.switch_page(1))
         self.btn_exp.clicked.connect(lambda: self.switch_page(2))
-        self.btn_movement.clicked.connect(lambda: self.switch_page(3))
-        self.btn_settings.clicked.connect(lambda: self.switch_page(4))
+        self.btn_settings.clicked.connect(lambda: self.switch_page(3))
 
         # Default selected
         self.btn_main.setChecked(True)
@@ -95,12 +86,7 @@ class MainWindow(QMainWindow):
         # OPTIONAL: load QSS theme
         # self.apply_dark_theme()
 
-    def closeEvent(self, event):
-        """Handle window close event to clean up resources."""
-        self.page_combat.cleanup()
-        if self.farming_manager:
-            self.farming_manager.cleanup()
-        event.accept()
+
 
     # ====================================================================
     # Helpers
@@ -115,7 +101,6 @@ class MainWindow(QMainWindow):
             self.btn_main,
             self.btn_combat,
             self.btn_exp,
-            self.btn_movement,
             self.btn_settings
         ][index]
         btn.setChecked(True)
@@ -126,7 +111,6 @@ class MainWindow(QMainWindow):
             self.btn_main,
             self.btn_combat,
             self.btn_exp,
-            self.btn_movement,
             self.btn_settings
         ]:
             btn.setChecked(False)
