@@ -13,7 +13,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("KoniuBot")
+        self.setWindowTitle("TroyanEyes")
         self.resize(900, 600)
 
         # --- ROOT LAYOUT -------------------------------------------------
