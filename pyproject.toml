@@ -1,7 +1,7 @@
 [project]
-name = "koniubot"
-version = "0.1.0"
-requires-python = ">=3.9"
+name = "troyaneyes"
+version = "1.0.3"
+requires-python = ">=3.14"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
