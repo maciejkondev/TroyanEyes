@@ -9,6 +9,7 @@ from PySide6.QtCore import QThread, Signal, Qt
 GITHUB_API_URL = "https://api.github.com/repos/maciejkondev/TroyanEyes/releases/latest"
 TARGET_DIR = "."
 REQUIRED_FILES = ["TroyanEyes.exe", "TEPatcher.exe", "model.pt"]
+CURRENT_EXE = os.path.basename(sys.argv[0]).lower()
 
 class DownloadWorker(QThread):
     progress = Signal(str, int)  # current_file, percent
@@ -41,6 +42,10 @@ class DownloadWorker(QThread):
 
             for target_file in REQUIRED_FILES:
                 # Find asset url
+                if target_file.lower() == CURRENT_EXE:
+                    self.log.emit(f"Skipping {target_file}: cannot update while running.")
+                    continue
+                
                 asset = next((a for a in assets if a["name"] == target_file), None)
                 
                 if not asset:
