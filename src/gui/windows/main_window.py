@@ -174,6 +174,11 @@ class SimplePage(QWidget):
 # --------------------------
 # Main Window
 # --------------------------
+from gui.pages.combat_page import CombatPage
+
+# --------------------------
+# Main Window
+# --------------------------
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -185,7 +190,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
 
         self.start_page = MainPage(main_window=self)
-        self.bossing_page = SimplePage()
+        self.bossing_page = CombatPage()
         self.exp_page = SimplePage()
         self.autologin_page = SimplePage()
         self.settings_page = SimplePage()
