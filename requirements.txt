@@ -1,11 +1,14 @@
-PySide6==6.10.0
+dxcam==0.0.5
+mss==10.1.0
+numpy==2.3.5
+opencv_python==4.12.0.88
+pyautogui==0.9.54
+pynput==1.8.1
+pyside6==6.10.0
 pyside6_addons==6.10.0
 pyside6_essentials==6.10.0
-requests==2.31.0 #only needed if you are going to use patcher
-opencv-python
-mss
-ultralytics
-numpy
-rapidocr_onnxruntime
-pygetwindow
-dxcam
+python_Levenshtein==0.27.3
+pywin32==311
+rapidocr_onnxruntime==1.2.3
+Requests==2.32.5
+ultralytics==8.3.232
