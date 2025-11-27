@@ -6,3 +6,6 @@ opencv-python
 mss
 ultralytics
 numpy
+rapidocr_onnxruntime
+pygetwindow
+dxcam

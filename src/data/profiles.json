@@ -1,0 +1,39 @@
+{
+    "profiles": {
+        "Senthia": {
+            "exe_path": "C:/Users/macie/Downloads/SenthiaClient_ver_1.0/SenthiaClient_ver_1.0/Senthia.exe",
+            "teleporter": {
+                "map_list": [
+                    {
+                        "name": "Czerwony Las",
+                        "checked": false
+                    },
+                    {
+                        "name": "Loch Paj\u0105k\u00f3w",
+                        "checked": false
+                    },
+                    {
+                        "name": "Dolina Ork\u00f3w",
+                        "checked": false
+                    },
+                    {
+                        "name": "G\u00f3ra Sohan",
+                        "checked": false
+                    },
+                    {
+                        "name": "Pustynia",
+                        "checked": false
+                    },
+                    {
+                        "name": "Grota Wygna\u0144c\u00f3w V2",
+                        "checked": true
+                    }
+                ]
+            },
+            "autologin_key_sequence": "{F1},{Enter}",
+            "autologin_delay": "5",
+            "autologin_key_delay": "3"
+        }
+    },
+    "last_used": "Senthia"
+}

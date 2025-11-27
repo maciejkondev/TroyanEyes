@@ -30,9 +30,13 @@ class BossFarmingManager(QObject):
         self.boss_worker = None
         self.hotkey_listener = None
 
-    def start_boss_farming(self) -> Optional[Any]:
+    def start_boss_farming(self, priority_list=None) -> Optional[Any]:
         from gui.controllers.boss_worker import BossDetectionWorker
-        self.boss_worker = BossDetectionWorker({})
+        config = {}
+        if priority_list:
+            config["map_priority"] = priority_list
+            
+        self.boss_worker = BossDetectionWorker(config)
         self.boss_worker.start()
         return self.boss_worker
 
