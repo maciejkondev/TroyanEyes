@@ -71,6 +71,7 @@ class BossDetectionWorker(QThread):
         self.detected_roi = None
         self.last_roi_update_time = 0
         self.last_scroll_time = 0
+        self.last_target_found_time = 0
         self.scroll_count = 0
         self.scroll_direction = 1  # 1 for down, -1 for up
         self.ROI_UPDATE_INTERVAL = 2.0  # Check every 2 seconds
@@ -241,21 +242,27 @@ class BossDetectionWorker(QThread):
                         ratio = Levenshtein.ratio(text.lower(), priority_map.lower())
                         
                         if ratio > 0.6:
-                            # Additional check for version numbers (V1, V2, V3, etc.)
-                            # Extract version if present
-                            import re
-                            text_version = re.search(r'v(\d+)', text.lower())
-                            map_version = re.search(r'v(\d+)', priority_map.lower())
+                            # Found a potential match based on string similarity
                             
-                            # If both have version numbers, they must match exactly
-                            if text_version and map_version:
-                                if text_version.group(1) != map_version.group(1):
-                                    continue  # Version mismatch, skip this match
+                            # Improved version/number matching
+                            import re
+                            # Extract all sequences of digits
+                            text_nums = re.findall(r'\d+', text)
+                            map_nums = re.findall(r'\d+', priority_map)
+                            
+                            # If the priority map expects a number (e.g. V2, V3), ensure the text has it
+                            if map_nums:
+                                if not text_nums:
+                                    continue # Map has number, text doesn't -> skip
+                                # Check if the LAST number matches (usually the version)
+                                if text_nums[-1] != map_nums[-1]:
+                                    continue # Numbers don't match
                             
                             # Found a valid match - check if it's the highest priority so far
                             if found_priority_index is None or idx < found_priority_index:
                                 found_priority_index = idx
                                 found_target = True
+                                self.last_target_found_time = time.time()
                                 print(f"Target map '{priority_map}' found at priority {idx} (matched OCR: '{text}')")
                             break
                     
@@ -263,7 +270,8 @@ class BossDetectionWorker(QThread):
                     if found_target:
                         break
                 
-                if not found_target and self.scroll_template is not None:
+                # Only scroll if we haven't found the target recently (debounce)
+                if not found_target and (now - self.last_target_found_time > 2.0) and self.scroll_template is not None:
                     # Target map not found, try to scroll
                     try:
                         # frame is BGR, template is BGR

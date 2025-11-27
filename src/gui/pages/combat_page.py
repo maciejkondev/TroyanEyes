@@ -102,7 +102,19 @@ class TeleporterTab(QWidget):
 
         # Known map list
         self.known_maps = [
-            "Dolina Orków", "Góra Sohan", "Pustynia", "Loch Pająków", "Czerwony Las", "Grota Wygnańców V2", "Mroczna Krypta V5"
+            "Dolina Orków", 
+            "Góra Sohan", 
+            "Pustynia", 
+            "Loch Pająków", 
+            "Czerwony Las", 
+            "Grota Wygnańców V2", 
+            "Grota Wygnańców V3", 
+            "Grota Wygnańców V4", 
+            "Mroczna Krypta V1",
+            "Mroczna Krypta V2",
+            "Mroczna Krypta V3",
+            "Mroczna Krypta V4", 
+            "Mroczna Krypta V5"
         ]
 
     def init_ui(self):
