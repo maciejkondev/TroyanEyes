@@ -1,7 +1,7 @@
 [project]
 name = "troyaneyes"
-version = "1.0.3"
-requires-python = ">=3.14"
+version = "1.0.5"
+requires-python = ">=3.13"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
