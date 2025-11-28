@@ -16,6 +16,7 @@ class DownloadWorker(QThread):
     finished = Signal()
     error = Signal(str)
     log = Signal(str)
+    version_found = Signal(str)
 
     def run(self):
         try:
@@ -31,6 +32,7 @@ class DownloadWorker(QThread):
 
             tag_name = data.get("tag_name", "Unknown")
             self.log.emit(f"Found latest release: {tag_name}")
+            self.version_found.emit(tag_name)
 
             # 2. Prepare Target Directory
             if not os.path.exists(TARGET_DIR):
@@ -53,7 +55,16 @@ class DownloadWorker(QThread):
                     continue
 
                 download_url = asset["browser_download_url"]
+                remote_size = asset.get("size", 0)
                 save_path = os.path.join(TARGET_DIR, target_file)
+                
+                # Check if file exists and size matches
+                if os.path.exists(save_path):
+                    local_size = os.path.getsize(save_path)
+                    if local_size == remote_size and remote_size > 0:
+                        self.log.emit(f"Skipping {target_file}: already up to date.")
+                        self.progress.emit(target_file, 100)
+                        continue
                 
                 self.log.emit(f"Downloading {target_file}...")
                 
@@ -94,7 +105,7 @@ class PatcherWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("TroyanEyes Patcher")
-        self.resize(400, 200)
+        self.resize(400, 250)
         self.init_ui()
         
         self.worker = None
@@ -104,8 +115,13 @@ class PatcherWindow(QWidget):
         
         self.lbl_status = QLabel("Ready to update.")
         self.lbl_status.setAlignment(Qt.AlignCenter)
-        self.lbl_status.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
+        self.lbl_status.setStyleSheet("font-size: 14px; margin-bottom: 5px;")
         layout.addWidget(self.lbl_status)
+
+        self.lbl_version = QLabel("")
+        self.lbl_version.setAlignment(Qt.AlignCenter)
+        self.lbl_version.setStyleSheet("font-size: 12px; font-weight: bold; color: #2ecc71; margin-bottom: 10px;")
+        layout.addWidget(self.lbl_version)
 
         self.pbar = QProgressBar()
         self.pbar.setValue(0)
@@ -127,17 +143,22 @@ class PatcherWindow(QWidget):
     def start_patching(self):
         self.btn_start.setEnabled(False)
         self.pbar.setValue(0)
+        self.lbl_version.setText("Checking version...")
         
         self.worker = DownloadWorker()
         self.worker.progress.connect(self.update_progress)
         self.worker.log.connect(self.update_log)
         self.worker.error.connect(self.handle_error)
         self.worker.finished.connect(self.handle_finished)
+        self.worker.version_found.connect(self.update_version)
         self.worker.start()
 
     def update_progress(self, filename, percent):
         self.lbl_status.setText(f"Downloading {filename}...")
         self.pbar.setValue(percent)
+
+    def update_version(self, version):
+        self.lbl_version.setText(f"Latest Version: {version}")
 
     def update_log(self, message):
         self.lbl_log.setText(message)
