@@ -88,6 +88,10 @@ class BossDetectionWorker(QThread):
         self.last_ocr_time = 0
         self.latest_ocr_result = None
         self.ocr_lock = threading.Lock()
+        
+        # Template Cache
+        self.dynamic_templates = {}
+        self.template_lock = threading.Lock()
 
         # Performance metrics
         self.last_ocr_fps = 0.0
@@ -156,6 +160,7 @@ class BossDetectionWorker(QThread):
         # If the game is on another monitor, this might need adjustment.
         try:
             self.camera = dxcam.create(output_color="BGR")
+            self.camera.start(target_fps=60, video_mode=True) # Start in video mode for better performance
         except Exception as e:
             print(f"DXCam init error: {e}")
             self.status_changed.emit(f"DXCam Error: {e}")
@@ -223,16 +228,39 @@ class BossDetectionWorker(QThread):
 
             # 2. Capture with DXCam
             try:
-                frame = self.camera.grab(region=region)
+                # In video mode, get_latest_frame is non-blocking and instant
+                frame = self.camera.get_latest_frame()
+                if frame is not None:
+                    # DXCam returns full screen in video mode, need to crop
+                    # But wait, create(region=...) is not supported in video mode for some versions?
+                    # Let's assume we get full frame and crop manually
+                    pass
             except Exception as e:
                 print(f"DXCam grab error: {e}")
                 time.sleep(0.1)
                 continue
             
             if frame is None:
-                # No new frame or error
-                time.sleep(0.01)
+                # No new frame
+                time.sleep(0.005) # Very short sleep
                 continue
+                
+            # Crop to region manually since video mode captures full monitor
+            # region = (abs_left, abs_top, abs_right, abs_bottom)
+            # frame shape is (H, W, C)
+            try:
+                # Ensure coordinates are within bounds
+                h, w = frame.shape[:2]
+                r_left = max(0, region[0] - win_left) # DXCam captures relative to monitor? 
+                # Actually DXCam captures monitor. win_left is relative to monitor.
+                # So region[0] is absolute monitor x.
+                
+                # Wait, if we use video_mode=True, we get the full monitor frame.
+                # We need to crop it using the calculated region.
+                frame = frame[region[1]:region[3], region[0]:region[2]]
+            except Exception as e:
+                # print(f"Crop error: {e}")
+                pass
 
             # frame is already BGR because we set output_color="BGR"
             
@@ -286,6 +314,44 @@ class BossDetectionWorker(QThread):
                         if priority_map in self.checked_maps:
                             continue
 
+                        # --- FAST PATH: Template Matching ---
+                        # Check if we have a cached template for this map
+                        template_key = f"map:{priority_map}"
+                        rect, conf = self._find_with_template(processed, template_key, threshold=0.85)
+                        
+                        if rect:
+                            x, y, w, h = rect
+                            # Calculate click position
+                            center_x = x + w // 2
+                            center_y = y + h // 2
+                            
+                            if SCALE_FACTOR != 1.0:
+                                center_x = int(center_x / SCALE_FACTOR)
+                                center_y = int(center_y / SCALE_FACTOR)
+                                
+                            click_x = region[0] + center_x
+                            click_y = region[1] + center_y
+                            
+                            print(f"Target map '{priority_map}' found via TEMPLATE (conf: {conf:.2f})")
+                            
+                            if self.click_enabled:
+                                try:
+                                    print(f"Clicking on map '{priority_map}' at ({click_x}, {click_y})")
+                                    pyautogui.moveTo(click_x, click_y)
+                                    time.sleep(np.random.uniform(0.02, 0.03))
+                                    pyautogui.click()
+                                    
+                                    self.checked_maps[priority_map] = now
+                                    self.current_map_name = priority_map
+                                    self.state = "WAITING_FOR_BOSS_LIST"
+                                    self.state_timer = now
+                                    found_target = True
+                                    self.last_target_found_time = time.time()
+                                except Exception as e:
+                                    print(f"Click error: {e}")
+                            break
+
+                        # --- SLOW PATH: OCR ---
                         for box, text, conf in self.latest_ocr_result:
                             ratio = Levenshtein.ratio(text.lower(), priority_map.lower())
                             
@@ -305,6 +371,29 @@ class BossDetectionWorker(QThread):
                                     found_target = True
                                     self.last_target_found_time = time.time()
                                     print(f"Target map '{priority_map}' found at priority {idx} (matched OCR: '{text}')")
+                                    
+                                    # --- CACHE UPDATE ---
+                                    # Extract and save template
+                                    try:
+                                        # box is [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+                                        xs = [p[0] for p in box]
+                                        ys = [p[1] for p in box]
+                                        min_x, max_x = int(min(xs)), int(max(xs))
+                                        min_y, max_y = int(min(ys)), int(max(ys))
+                                        
+                                        # Add some padding
+                                        pad = 2
+                                        min_x = max(0, min_x - pad)
+                                        min_y = max(0, min_y - pad)
+                                        max_x = min(processed.shape[1], max_x + pad)
+                                        max_y = min(processed.shape[0], max_y + pad)
+                                        
+                                        template_img = processed[min_y:max_y, min_x:max_x].copy()
+                                        with self.template_lock:
+                                            self.dynamic_templates[template_key] = template_img
+                                        # print(f"Cached template for {priority_map}")
+                                    except Exception as e:
+                                        print(f"Failed to cache template: {e}")
                                     
                                     if self.click_enabled:
                                         try:
@@ -408,8 +497,45 @@ class BossDetectionWorker(QThread):
 
                 # --- STATE: CHECKING_BOSSES ---
                 elif self.state == "CHECKING_BOSSES":
+                    
+                    # --- FAST PATH: Template Matching for "Dostępny" ---
+                    template_key = "status:dostepny"
+                    rect, conf = self._find_with_template(processed, template_key, threshold=0.80)
+                    
+                    if rect:
+                        x, y, w, h = rect
+                        # Calculate click position (Right edge + 20px)
+                        target_x = int(x + w + 20)
+                        target_y = int(y + h // 2)
+                        
+                        if SCALE_FACTOR != 1.0:
+                            target_x = int(target_x / SCALE_FACTOR)
+                            target_y = int(target_y / SCALE_FACTOR)
+                            
+                        click_x = region[0] + target_x
+                        click_y = region[1] + target_y
+                        
+                        print(f"Found 'Dostępny' boss via TEMPLATE (conf: {conf:.2f}), clicking Teleport at ({click_x}, {click_y})")
+                        try:
+                            pyautogui.moveTo(click_x, click_y)
+                            pyautogui.click()
+                            
+                            # Lock onto this boss
+                            self.state = "MONITORING_BOSS"
+                            self.locked_boss_roi = {
+                                "min_x": x, "max_x": x + w,
+                                "min_y": y, "max_y": y + h,
+                                "text": "Dostępny"
+                            }
+                            self.boss_status_change_counter = 0
+                            self.state_timer = time.time()
+                            print(f"Locked onto boss. Monitoring for status change...")
+                        except Exception as e:
+                            print(f"Click boss error: {e}")
+                    
+                    # --- SLOW PATH: OCR ---
                     # Ensure we have fresh OCR results
-                    if self.last_ocr_time > self.state_timer:
+                    elif self.last_ocr_time > self.state_timer:
                         found_boss = False
                         for box, text, conf in self.latest_ocr_result:
                             # Check for "Dostępny"
@@ -425,6 +551,21 @@ class BossDetectionWorker(QThread):
                                     
                                     center_y = int(np.mean(ys))
                                     
+                                    # --- CACHE UPDATE ---
+                                    try:
+                                        pad = 2
+                                        t_min_x = max(0, int(min_x) - pad)
+                                        t_min_y = max(0, int(min_y) - pad)
+                                        t_max_x = min(processed.shape[1], int(max_x) + pad)
+                                        t_max_y = min(processed.shape[0], int(max_y) + pad)
+                                        
+                                        template_img = processed[t_min_y:t_max_y, t_min_x:t_max_x].copy()
+                                        with self.template_lock:
+                                            self.dynamic_templates[template_key] = template_img
+                                        # print("Cached template for 'Dostępny'")
+                                    except Exception as e:
+                                        print(f"Failed to cache 'Dostępny' template: {e}")
+
                                     # Target: 20px to the right of the text
                                     target_x = int(max_x + 20)
                                     target_y = center_y
@@ -475,13 +616,36 @@ class BossDetectionWorker(QThread):
                 # --- STATE: MONITORING_BOSS ---
                 elif self.state == "MONITORING_BOSS":
                     # Check if the locked boss status has changed
-                    if self.latest_ocr_result:
+                    # FAST PATH: Template Matching
+                    template_key = "status:dostepny"
+                    is_still_available = False
+                    
+                    # 1. Try template matching first if available
+                    with self.template_lock:
+                        has_template = template_key in self.dynamic_templates
+                        
+                    if has_template:
+                        # Crop the locked ROI from the current frame to search within
+                        try:
+                            l_min_x = int(max(0, self.locked_boss_roi["min_x"] - 10))
+                            l_min_y = int(max(0, self.locked_boss_roi["min_y"] - 10))
+                            l_max_x = int(min(processed.shape[1], self.locked_boss_roi["max_x"] + 10))
+                            l_max_y = int(min(processed.shape[0], self.locked_boss_roi["max_y"] + 10))
+                            
+                            roi_img = processed[l_min_y:l_max_y, l_min_x:l_max_x]
+                            
+                            # Search for template within this small ROI
+                            rect, conf = self._find_with_template(roi_img, template_key, threshold=0.70)
+                            if rect:
+                                is_still_available = True
+                                # print(f"Boss status confirmed via TEMPLATE (conf: {conf:.2f})")
+                        except Exception as e:
+                            print(f"Monitoring template error: {e}")
+                    
+                    # 2. Fallback to OCR if template check failed or no template
+                    if not is_still_available and self.latest_ocr_result:
                         # Look for "Dostępny" in the locked ROI
-                        is_still_available = False
-                        
-                        # Define a tolerance for position shifts (e.g. 10px)
                         TOLERANCE = 10
-                        
                         for box, text, conf in self.latest_ocr_result:
                             # Check if this text block overlaps with our locked ROI
                             xs = [p[0] for p in box]
@@ -497,18 +661,22 @@ class BossDetectionWorker(QThread):
                                     is_still_available = True
                                     break
                         
-                        if not is_still_available:
-                            self.boss_status_change_counter += 1
-                            # print(f"Boss status might have changed... ({self.boss_status_change_counter}/5)")
-                        else:
-                            self.boss_status_change_counter = 0 # Reset if we see it again
-                            
-                        # If status changed consistently for ~1.5 seconds (approx 5 frames at 0.35s interval)
-                        if self.boss_status_change_counter >= 5:
-                            print("Boss status changed (confirmed). Switching to next boss.")
-                            self.state = "CHECKING_BOSSES"
-                            self.state_timer = time.time()
-                            self.boss_status_change_counter = 0
+                    if not is_still_available:
+                        self.boss_status_change_counter += 1
+                        # print(f"Boss status might have changed... ({self.boss_status_change_counter}/5)")
+                    else:
+                        self.boss_status_change_counter = 0 # Reset if we see it again
+                        
+                    # If status changed consistently for ~1.5 seconds (approx 5 frames at 0.35s interval)
+                    # With template matching running at ~30FPS, we need to increase the counter threshold
+                    # Let's say 0.5 seconds at 30FPS = 15 frames
+                    threshold = 15 if has_template else 5
+                    
+                    if self.boss_status_change_counter >= threshold:
+                        print("Boss status changed (confirmed). Switching to next boss.")
+                        self.state = "CHECKING_BOSSES"
+                        self.state_timer = time.time()
+                        self.boss_status_change_counter = 0
 
                 # --- STATE: CHANGING_CHANNEL ---
                 elif self.state == "CHANGING_CHANNEL":
@@ -607,6 +775,8 @@ class BossDetectionWorker(QThread):
 
     def stop(self):
         self.should_stop = True
+        if self.camera:
+            self.camera.stop()
         self.wait()
 
     def pause(self):
@@ -619,3 +789,37 @@ class BossDetectionWorker(QThread):
 
     def reset(self):
         self.status_changed.emit("Reset")
+
+    def _find_with_template(self, image, template_key, threshold=0.8):
+        """
+        Attempts to find a cached template in the given image.
+        Returns ((x, y, w, h), confidence) or (None, 0.0)
+        """
+        with self.template_lock:
+            if template_key not in self.dynamic_templates:
+                return None, 0.0
+            template = self.dynamic_templates[template_key]
+
+        try:
+            # Ensure image is grayscale if template is grayscale
+            if len(template.shape) == 2 and len(image.shape) == 3:
+                search_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                search_img = image
+
+            # Template matching - SQDIFF_NORMED is often faster and robust
+            res = cv2.matchTemplate(search_img, template, cv2.TM_SQDIFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+
+            # For SQDIFF, smaller value means better match (0.0 is perfect)
+            # Threshold needs to be inverted: 0.8 confidence -> 0.2 diff
+            match_quality = 1.0 - min_val
+            
+            if match_quality >= threshold:
+                h, w = template.shape[:2]
+                return (min_loc[0], min_loc[1], w, h), match_quality
+            
+            return None, match_quality
+        except Exception as e:
+            # print(f"Template match error for {template_key}: {e}")
+            return None, 0.0
