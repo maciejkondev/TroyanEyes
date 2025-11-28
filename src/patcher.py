@@ -1,6 +1,7 @@
 import sys
 import os
 import requests
+import subprocess
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel, 
                                QProgressBar, QPushButton, QMessageBox)
 from PySide6.QtCore import QThread, Signal, Qt
@@ -17,6 +18,7 @@ class DownloadWorker(QThread):
     error = Signal(str)
     log = Signal(str)
     version_found = Signal(str)
+    restart_required = Signal()
 
     def run(self):
         try:
@@ -48,10 +50,6 @@ class DownloadWorker(QThread):
 
             for target_file in REQUIRED_FILES:
                 # Find asset in releases (newest first)
-                if target_file.lower() == CURRENT_EXE:
-                    self.log.emit(f"Skipping {target_file}: cannot update while running.")
-                    continue
-                
                 asset = None
                 found_version = None
                 
@@ -76,7 +74,7 @@ class DownloadWorker(QThread):
                 # Determine save path
                 save_path = os.path.join(TARGET_DIR, target_file)
                 
-                # Special handling for model.pt to find where it lives
+                # Special handling for model.pt
                 if target_file == "model.pt":
                     possible_paths = [
                         os.path.join(TARGET_DIR, "data", "weights", "model.pt"),
@@ -94,8 +92,36 @@ class DownloadWorker(QThread):
                             save_path = p
                             break
                 
-                # Check if file exists and size matches
-                if os.path.exists(save_path):
+                # SELF-UPDATE LOGIC
+                is_self_update = False
+                if target_file.lower() == CURRENT_EXE:
+                    # Only if running as frozen exe (not python script)
+                    if getattr(sys, 'frozen', False):
+                        local_size = os.path.getsize(sys.executable)
+                        if local_size != remote_size:
+                            self.log.emit(f"Self-update detected for {target_file}...")
+                            is_self_update = True
+                            
+                            # Rename current exe to .old
+                            try:
+                                old_path = sys.executable + ".old"
+                                if os.path.exists(old_path):
+                                    os.remove(old_path) # Try to remove previous backup
+                                os.rename(sys.executable, old_path)
+                                self.log.emit("Renamed current executable to .old")
+                            except Exception as e:
+                                self.error.emit(f"Failed to rename for update: {e}")
+                                return
+                        else:
+                            self.log.emit(f"Skipping {target_file}: already up to date.")
+                            self.progress.emit(target_file, 100)
+                            continue
+                    else:
+                        self.log.emit(f"Skipping {target_file}: cannot update running script.")
+                        continue
+
+                # Check if file exists and size matches (skip if not self-update)
+                if not is_self_update and os.path.exists(save_path):
                     local_size = os.path.getsize(save_path)
                     if local_size == remote_size and remote_size > 0:
                         self.log.emit(f"Skipping {target_file}: already up to date.")
@@ -127,6 +153,11 @@ class DownloadWorker(QThread):
                     downloaded_count += 1
                     self.log.emit(f"Successfully downloaded {target_file}")
                     
+                    if is_self_update:
+                        self.log.emit("Restarting patcher...")
+                        self.restart_required.emit()
+                        return # Stop processing, restart first
+                    
                 except Exception as e:
                     self.error.emit(f"Failed to download {target_file}:\n{e}")
                     return
@@ -143,8 +174,19 @@ class PatcherWindow(QWidget):
         self.setWindowTitle("TroyanEyes Patcher")
         self.resize(400, 250)
         self.init_ui()
-        
+        self.cleanup_old_files()
         self.worker = None
+
+    def cleanup_old_files(self):
+        """Try to remove .old files from previous updates"""
+        if getattr(sys, 'frozen', False):
+            old_path = sys.executable + ".old"
+            if os.path.exists(old_path):
+                try:
+                    os.remove(old_path)
+                    print(f"Cleaned up {old_path}")
+                except:
+                    pass
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -187,6 +229,7 @@ class PatcherWindow(QWidget):
         self.worker.error.connect(self.handle_error)
         self.worker.finished.connect(self.handle_finished)
         self.worker.version_found.connect(self.update_version)
+        self.worker.restart_required.connect(self.handle_restart)
         self.worker.start()
 
     def update_progress(self, filename, percent):
@@ -209,9 +252,17 @@ class PatcherWindow(QWidget):
         self.btn_start.setEnabled(True)
         self.lbl_status.setText("Up to date.")
         self.pbar.setValue(100)
+        
+    def handle_restart(self):
+        self.lbl_status.setText("Restarting...")
+        # Launch the new executable
+        try:
+            subprocess.Popen([sys.executable])
+            sys.exit(0)
+        except Exception as e:
+            QMessageBox.critical(self, "Restart Error", f"Failed to restart:\n{e}")
 
 if __name__ == "__main__":
-
     
     app = QApplication(sys.argv)
     window = PatcherWindow()
