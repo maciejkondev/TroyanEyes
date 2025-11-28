@@ -353,9 +353,21 @@ class TeleporterTab(QWidget):
 
     def load_settings(self, data):
         self.map_list.set_state(data.get("map_list", []))
+        self.click_checkbox.setChecked(data.get("click_enabled", False))
+        self.channel_spin.setValue(data.get("num_channels", 1))
+        self.device_combo.setCurrentText(data.get("ocr_backend", "CPU"))
+        self.key_combo.setCurrentText(data.get("pelerynka_key", "F1"))
+        self.preview_checkbox.setChecked(data.get("show_preview", True))
 
     def get_settings(self):
-        return {"map_list": self.map_list.get_state()}
+        return {
+            "map_list": self.map_list.get_state(),
+            "click_enabled": self.click_checkbox.isChecked(),
+            "num_channels": self.channel_spin.value(),
+            "ocr_backend": self.device_combo.currentText(),
+            "pelerynka_key": self.key_combo.currentText(),
+            "show_preview": self.preview_checkbox.isChecked()
+        }
 
 
 ##############################################
