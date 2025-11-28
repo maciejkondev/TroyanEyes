@@ -81,6 +81,9 @@ class BossDetectionWorker(QThread):
         self.current_channel = 1
         self.channel_switch_time = 0
 
+        self.pelerynka_key = config.get("pelerynka_key", "F1")
+        self.space_held = False
+
         # DXCam instance
         self.camera = None
 
@@ -615,6 +618,20 @@ class BossDetectionWorker(QThread):
 
                 # --- STATE: MONITORING_BOSS ---
                 elif self.state == "MONITORING_BOSS":
+                    # --- PELERYNKA & SPACEBAR LOGIC ---
+                    if not self.space_held:
+                        print(f"Boss locked. Pressing {self.pelerynka_key} and holding Space.")
+                        try:
+                            # Press Pelerynka key once
+                            pyautogui.press(self.pelerynka_key.lower())
+                            time.sleep(0.05)
+                            
+                            # Hold Spacebar
+                            pyautogui.keyDown('space')
+                            self.space_held = True
+                        except Exception as e:
+                            print(f"Input error: {e}")
+
                     # Check if the locked boss status has changed
                     # FAST PATH: Template Matching
                     template_key = "status:dostepny"
@@ -674,6 +691,13 @@ class BossDetectionWorker(QThread):
                     
                     if self.boss_status_change_counter >= threshold:
                         print("Boss status changed (confirmed). Switching to next boss.")
+                        
+                        # Release Spacebar
+                        if self.space_held:
+                            print("Releasing Spacebar.")
+                            pyautogui.keyUp('space')
+                            self.space_held = False
+                            
                         self.state = "CHECKING_BOSSES"
                         self.state_timer = time.time()
                         self.boss_status_change_counter = 0
@@ -777,6 +801,16 @@ class BossDetectionWorker(QThread):
         self.should_stop = True
         if self.camera:
             self.camera.stop()
+        
+        # Release spacebar if held
+        if self.space_held:
+            print("Stopping worker: Releasing Spacebar.")
+            try:
+                pyautogui.keyUp('space')
+                self.space_held = False
+            except:
+                pass
+                
         self.wait()
 
     def pause(self):
