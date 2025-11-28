@@ -18,6 +18,57 @@ class BossFarmingConfig:
     def get_metin_config(self):
         return self.config["metin"]
         
+    def update_boss_config(self, updates):
+        pass
+
+class BossFarmingManager(QObject):
+    """Manager skeleton."""
+
+    def __init__(self):
+        super().__init__()
+        self.config_manager = BossFarmingConfig()
+        self.boss_worker = None
+        self.hotkey_listener = None
+        self.cached_templates = {}
+
+    def start_boss_farming(self, priority_list=None, click_enabled=False, num_channels=1, ocr_backend="CPU", pelerynka_key="F1", show_preview=True) -> Optional[Any]:
+        from gui.controllers.boss_worker import BossDetectionWorker
+        config = {}
+        if priority_list:
+            config["map_priority"] = priority_list
+        config["click_enabled"] = click_enabled
+        config["num_channels"] = num_channels
+        config["ocr_backend"] = ocr_backend
+        config["pelerynka_key"] = pelerynka_key
+        config["show_preview"] = show_preview
+        config["initial_templates"] = self.cached_templates
+            
+        self.boss_worker = BossDetectionWorker(config)
+        self.boss_worker.start()
+        return self.boss_worker
+
+    def stop_boss_farming(self):
+        if self.boss_worker:
+            # Save templates before stopping
+            if hasattr(self.boss_worker, 'dynamic_templates'):
+                with self.boss_worker.template_lock:
+                    self.cached_templates = self.boss_worker.dynamic_templates.copy()
+            
+            self.boss_worker.stop()
+            self.boss_worker = None
+            
+    def clear_templates(self):
+        """Manually clear cached templates."""
+        self.cached_templates = {}
+        if self.boss_worker:
+            with self.boss_worker.template_lock:
+                self.boss_worker.dynamic_templates = {}
+
+    def pause_boss_farming(self):
+        if self.boss_worker:
+            self.boss_worker.pause()
+
+    def resume_boss_farming(self):
         if self.boss_worker:
             self.boss_worker.resume()
 

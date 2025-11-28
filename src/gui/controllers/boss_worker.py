@@ -166,12 +166,10 @@ class BossDetectionWorker(QThread):
     def run(self):
         self.status_changed.emit("Worker started")
         
-        # Initialize DXCam
-        # target_monitor=0 is usually the primary monitor. 
-        # If the game is on another monitor, this might need adjustment.
+        # Initialize DXCam (non-threaded, stable)
         try:
             self.camera = dxcam.create(output_color="BGR")
-            self.camera.start(target_fps=60, video_mode=True) # Start in video mode for better performance
+            print("DXCam initialized using grab() mode.")
         except Exception as e:
             print(f"DXCam init error: {e}")
             self.status_changed.emit(f"DXCam Error: {e}")
@@ -224,7 +222,9 @@ class BossDetectionWorker(QThread):
                                 self.last_roi_update_time = now
                                 # print(f"ROI updated: {self.detected_roi}")
                 except Exception as e:
-                    print(f"ROI detection error: {e}")
+                    # Skip ROI update on error, use fallback
+                    # Don't restart camera here since it will be restarted in the main capture loop if needed
+                    pass
             
             # Use detected ROI if available, else fallback
             current_roi = self.detected_roi if self.detected_roi else RELATIVE_ROI
@@ -237,41 +237,23 @@ class BossDetectionWorker(QThread):
 
             region = (abs_left, abs_top, abs_right, abs_bottom)
 
-            # 2. Capture with DXCam
+            # 2. Stable capture via grab(region)
             try:
-                # In video mode, get_latest_frame is non-blocking and instant
-                frame = self.camera.get_latest_frame()
-                if frame is not None:
-                    # DXCam returns full screen in video mode, need to crop
-                    # But wait, create(region=...) is not supported in video mode for some versions?
-                    # Let's assume we get full frame and crop manually
-                    pass
+                frame = self.camera.grab(region=region)
             except Exception as e:
                 print(f"DXCam grab error: {e}")
-                time.sleep(0.1)
+                try:
+                    del self.camera
+                    print("DXCam restarting...")
+                    self.camera = dxcam.create(output_color="BGR")
+                except Exception as ee:
+                    print(f"DXCam restart failed: {ee}")
+                    time.sleep(1.0)
                 continue
-            
+
             if frame is None:
-                # No new frame
-                time.sleep(0.005) # Very short sleep
+                time.sleep(0.005)
                 continue
-                
-            # Crop to region manually since video mode captures full monitor
-            # region = (abs_left, abs_top, abs_right, abs_bottom)
-            # frame shape is (H, W, C)
-            try:
-                # Ensure coordinates are within bounds
-                h, w = frame.shape[:2]
-                r_left = max(0, region[0] - win_left) # DXCam captures relative to monitor? 
-                # Actually DXCam captures monitor. win_left is relative to monitor.
-                # So region[0] is absolute monitor x.
-                
-                # Wait, if we use video_mode=True, we get the full monitor frame.
-                # We need to crop it using the calculated region.
-                frame = frame[region[1]:region[3], region[0]:region[2]]
-            except Exception as e:
-                # print(f"Crop error: {e}")
-                pass
 
             # frame is already BGR because we set output_color="BGR"
             
@@ -616,7 +598,35 @@ class BossDetectionWorker(QThread):
                                         
                                     click_x = region[0] + target_x
                                     click_y = region[1] + target_y
+                                    print(f"Found 'Dostępny' boss, clicking Teleport at ({click_x}, {click_y})")
+                                    pyautogui.moveTo(click_x, click_y)
+                                    pyautogui.click()
                                     
+                                    found_boss = True
+                                    
+                                    # Lock onto this boss
+                                    self.state = "MONITORING_BOSS"
+                                    self.locked_boss_roi = {
+                                        "min_x": min_x, "max_x": max_x,
+                                        "min_y": min_y, "max_y": max_y,
+                                        "text": text
+                                    }
+                                    self.boss_status_change_counter = 0
+                                    self.state_timer = time.time()
+                                    print(f"Locked onto boss. Monitoring for status change...")
+                                except Exception as e:
+                                    print(f"Click boss error: {e}")
+                                break
+                        
+                        if not found_boss:
+                            # Timeout - No more bosses found
+                            if time.time() - self.state_timer > 2.0:
+                                print(f"No available bosses found on {self.current_map_name} (Channel {self.current_channel})")
+                                
+                                # Check if we have more channels to check for this map
+                                if self.current_channel < self.num_channels:
+                                    self.state = "CHANGING_CHANNEL"
+                                    self.current_channel += 1
                                     self.state_timer = time.time()
                                 else:
                                     # All channels checked for this map, move to next map
