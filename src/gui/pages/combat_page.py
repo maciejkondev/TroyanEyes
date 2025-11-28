@@ -169,6 +169,10 @@ class TeleporterTab(QWidget):
         btn_select_icon.clicked.connect(self.setup_scroll_icon)
         btn_layout.addWidget(btn_select_icon)
 
+        self.preview_checkbox = QCheckBox("Show Preview")
+        self.preview_checkbox.setChecked(True)
+        btn_layout.addWidget(self.preview_checkbox)
+
         self.toggle_btn = QPushButton("Start Detection")
         self.toggle_btn.clicked.connect(self.toggle_farming)
         btn_layout.addWidget(self.toggle_btn)
@@ -184,9 +188,10 @@ class TeleporterTab(QWidget):
             num_channels = self.channel_spin.value()
             ocr_backend = self.device_combo.currentText()
             pelerynka_key = self.key_combo.currentText()
-            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}, backend: {ocr_backend}, key: {pelerynka_key}")
+            show_preview = self.preview_checkbox.isChecked()
+            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}, backend: {ocr_backend}, key: {pelerynka_key}, preview: {show_preview}")
             
-            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels, ocr_backend=ocr_backend, pelerynka_key=pelerynka_key)
+            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels, ocr_backend=ocr_backend, pelerynka_key=pelerynka_key, show_preview=show_preview)
             self.toggle_btn.setText("Stop Detection")
             self.status_label.setText("Status: Running")
         else:

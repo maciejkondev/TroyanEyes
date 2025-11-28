@@ -43,6 +43,7 @@ class BossDetectionWorker(QThread):
         self.map_priority = config.get("map_priority", [])
         self.click_enabled = config.get("click_enabled", False)
         self.ocr_backend = config.get("ocr_backend", "CPU")
+        self.show_preview = config.get("show_preview", True)
         
         if self.ocr_backend == "GPU (CUDA)":
             print("Initializing OCR with GPU (CUDA)...")
@@ -288,8 +289,37 @@ class BossDetectionWorker(QThread):
                 )
 
             # 6. Trigger OCR asynchronously
+            # OPTIMIZATION: Only run OCR if we are missing templates for selected maps or "Dostępny"
             now = time.time()
-            if now - self.last_ocr_time >= OCR_INTERVAL:
+            
+            # Determine required templates
+            required_templates = set()
+            for m in self.map_priority:
+                required_templates.add(f"map:{m}")
+            required_templates.add("status:dostepny")
+            
+            with self.template_lock:
+                cached_keys = set(self.dynamic_templates.keys())
+                
+            missing_templates = required_templates - cached_keys
+            ocr_needed = len(missing_templates) > 0
+            
+            # --- OCR WATCHDOG / FALLBACKS ---
+            # Ensure we don't stay blind if templates fail or environment changes
+            
+            # 1. SCANNING: If we haven't found a target map in > 3.0s, force OCR
+            if not ocr_needed and self.state == "SCANNING":
+                if (now - self.last_target_found_time > 3.0):
+                    ocr_needed = True
+            
+            # 2. CHECKING_BOSSES: If we are looking for bosses but haven't found one via template,
+            # force OCR before we timeout (timeout is usually ~2.0s).
+            if not ocr_needed and self.state == "CHECKING_BOSSES":
+                # If we have been checking for > 1.0s and haven't locked a boss yet, try OCR
+                if (now - self.state_timer > 1.0):
+                    ocr_needed = True
+
+            if ocr_needed and (now - self.last_ocr_time >= OCR_INTERVAL):
                 threading.Thread(
                     target=self._run_ocr,
                     args=(processed.copy(), now),
@@ -729,37 +759,69 @@ class BossDetectionWorker(QThread):
                             self.state = "SCANNING" # Abort to safe state
 
             # 7. Display preview
-            display_frame = frame.copy()
-            
-            # FPS counter
-            frame_fps = int(1.0 / max(0.00001, (time.time() - frame_start)))
-            cv2.putText(display_frame, f"Preview: {frame_fps} FPS", 
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            if self.show_preview:
+                display_frame = frame.copy()
+                
+                # FPS counter
+                frame_fps = int(1.0 / max(0.00001, (time.time() - frame_start)))
+                cv2.putText(display_frame, f"Preview: {frame_fps} FPS", 
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-            # OCR metrics
-            cv2.putText(display_frame, 
-                        f"OCR: {self.last_ocr_fps:.1f} FPS ({self.last_ocr_ms:.0f}ms)",
-                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                # OCR metrics
+                status_color = (0, 255, 0) if not ocr_needed else (0, 255, 255)
+                status_text = "OCR: Idle (All Cached)" if not ocr_needed else f"OCR: Active ({self.last_ocr_fps:.1f} FPS)"
+                cv2.putText(display_frame, status_text,
+                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
 
-            # Draw OCR results
-            with self.ocr_lock:
-                if self.latest_ocr_result:
-                    for box, text, conf in self.latest_ocr_result:
-                        if SCALE_FACTOR != 1.0:
-                            box = [[int(x / SCALE_FACTOR), int(y / SCALE_FACTOR)] 
-                                   for x, y in box]
-                        
-                        pts = np.array(box, dtype=np.int32)
-                        cv2.polylines(display_frame, [pts], True, (0, 255, 0), 2)
-                        
-                        cv2.putText(display_frame, f"{text} ({float(conf):.2f})",
-                                    (pts[0][0], max(10, pts[0][1] - 5)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                # Draw OCR results
+                with self.ocr_lock:
+                    if self.latest_ocr_result:
+                        for box, text, conf in self.latest_ocr_result:
+                            if SCALE_FACTOR != 1.0:
+                                box = [[int(x / SCALE_FACTOR), int(y / SCALE_FACTOR)] 
+                                       for x, y in box]
+                            
+                            pts = np.array(box, dtype=np.int32)
+                            cv2.polylines(display_frame, [pts], True, (0, 255, 0), 2)
+                            
+                            cv2.putText(display_frame, f"{text} ({float(conf):.2f})",
+                                        (pts[0][0], max(10, pts[0][1] - 5)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
-            cv2.imshow("OCR Live Preview (DXCam)", display_frame)
-            
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                # Visualize Cached Templates (Bottom of screen)
+                with self.template_lock:
+                    y_offset = display_frame.shape[0] - 60
+                    x_offset = 10
+                    for key, tmpl in self.dynamic_templates.items():
+                        try:
+                            # Resize for thumbnail
+                            h, w = tmpl.shape[:2]
+                            scale = 40 / h
+                            thumb = cv2.resize(tmpl, (int(w * scale), 40))
+                            
+                            # Convert to BGR if grayscale
+                            if len(thumb.shape) == 2:
+                                thumb = cv2.cvtColor(thumb, cv2.COLOR_GRAY2BGR)
+                                
+                            # Draw thumbnail
+                            h_t, w_t = thumb.shape[:2]
+                            if y_offset + h_t < display_frame.shape[0] and x_offset + w_t < display_frame.shape[1]:
+                                display_frame[y_offset:y_offset+h_t, x_offset:x_offset+w_t] = thumb
+                                cv2.rectangle(display_frame, (x_offset, y_offset), (x_offset+w_t, y_offset+h_t), (255, 0, 0), 1)
+                                cv2.putText(display_frame, key.split(':')[-1], (x_offset, y_offset-5), 
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 200, 0), 1)
+                                x_offset += w_t + 10
+                        except:
+                            pass
+
+                cv2.imshow("OCR Live Preview (DXCam)", display_frame)
+                
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            else:
+                # If preview disabled, sleep briefly to prevent CPU starvation
+                # This allows the OCR thread and DXCam background thread to run smoothly
+                time.sleep(0.01)
 
         self.status_changed.emit("Worker stopped")
         if self.camera:

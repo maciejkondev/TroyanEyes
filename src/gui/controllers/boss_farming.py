@@ -30,7 +30,7 @@ class BossFarmingManager(QObject):
         self.boss_worker = None
         self.hotkey_listener = None
 
-    def start_boss_farming(self, priority_list=None, click_enabled=False, num_channels=1, ocr_backend="CPU", pelerynka_key="F1") -> Optional[Any]:
+    def start_boss_farming(self, priority_list=None, click_enabled=False, num_channels=1, ocr_backend="CPU", pelerynka_key="F1", show_preview=True) -> Optional[Any]:
         from gui.controllers.boss_worker import BossDetectionWorker
         config = {}
         if priority_list:
@@ -39,6 +39,7 @@ class BossFarmingManager(QObject):
         config["num_channels"] = num_channels
         config["ocr_backend"] = ocr_backend
         config["pelerynka_key"] = pelerynka_key
+        config["show_preview"] = show_preview
             
         self.boss_worker = BossDetectionWorker(config)
         self.boss_worker.start()
