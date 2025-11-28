@@ -42,7 +42,28 @@ class BossDetectionWorker(QThread):
         self.config = config
         self.map_priority = config.get("map_priority", [])
         self.click_enabled = config.get("click_enabled", False)
-        self.ocr = RapidOCR()
+        self.ocr_backend = config.get("ocr_backend", "CPU")
+        
+        if self.ocr_backend == "GPU (CUDA)":
+            print("Initializing OCR with GPU (CUDA)...")
+            try:
+                self.ocr = RapidOCR(det_use_cuda=True, cls_use_cuda=True, rec_use_cuda=True)
+            except Exception as e:
+                print(f"Failed to init GPU (CUDA) OCR: {e}. Falling back to CPU.")
+                self.ocr = RapidOCR()
+        elif self.ocr_backend == "GPU (DirectML)":
+            print("Initializing OCR with GPU (DirectML)...")
+            try:
+                # DirectML is often enabled via det_use_dml=True in recent versions
+                # If not supported by installed version, it might throw or ignore.
+                self.ocr = RapidOCR(det_use_dml=True, cls_use_dml=True, rec_use_dml=True)
+            except Exception as e:
+                print(f"Failed to init GPU (DirectML) OCR: {e}. Falling back to CPU.")
+                self.ocr = RapidOCR()
+        else:
+            print("Initializing OCR with CPU...")
+            self.ocr = RapidOCR()
+            
         self.should_stop = False
         self.paused = False
         
@@ -300,6 +321,7 @@ class BossDetectionWorker(QThread):
                                             
                                             print(f"Clicking on map '{priority_map}' at ({click_x}, {click_y})")
                                             pyautogui.moveTo(click_x, click_y)
+                                            time.sleep(np.random.uniform(0.02, 0.03))
                                             pyautogui.click()
                                             
                                             # Update state
@@ -333,13 +355,40 @@ class BossDetectionWorker(QThread):
                                     icon_x = region[0] + local_x
                                     icon_y = region[1] + local_y
                                     
-                                    if now - self.last_scroll_time > 1.0:
-                                        if self.scroll_count >= 8:
-                                            self.scroll_direction *= -1
-                                            self.scroll_count = 0
-                                            print(f"Reversing scroll direction")
+                                    # Check if scrollbar is at the bottom or top of the ROI
+                                    # region is (abs_left, abs_top, abs_right, abs_bottom)
+                                    # local_y is relative to region top
+                                    roi_height = region[3] - region[1]
+                                    
+                                    is_at_bottom = local_y > (roi_height * 0.9)
+                                    is_at_top = local_y < (roi_height * 0.1)
+                                    
+                                    if is_at_bottom and self.scroll_direction == 1:
+                                        print("Scrollbar at bottom, reversing to UP.")
+                                        self.scroll_direction = -1
+                                        self.scroll_count = 0
+                                    elif is_at_top and self.scroll_direction == -1:
+                                        print("Scrollbar at top, reversing to DOWN.")
+                                        self.scroll_direction = 1
+                                        self.scroll_count = 0
+                                    
+                                    elif now - self.last_scroll_time > 1.0:
+                                        # Remove the arbitrary 8-scroll reversal if we rely on visual detection
+                                        # But keep a failsafe if needed, or just rely on boundaries.
+                                        # For now, let's trust the visual boundaries more.
                                         
                                         scroll_distance = 35 * self.scroll_direction
+                                        
+                                        # Double check boundaries before scrolling
+                                        if is_at_bottom and scroll_distance > 0:
+                                            self.scroll_direction = -1
+                                            scroll_distance = -35
+                                            print("Boundary check: Bottom reached, forcing UP.")
+                                        elif is_at_top and scroll_distance < 0:
+                                            self.scroll_direction = 1
+                                            scroll_distance = 35
+                                            print("Boundary check: Top reached, forcing DOWN.")
+                                        
                                         print(f"Scrolling... ({scroll_distance})")
                                         pyautogui.moveTo(icon_x, icon_y)
                                         pyautogui.dragRel(0, scroll_distance, duration=0.5, button='left')

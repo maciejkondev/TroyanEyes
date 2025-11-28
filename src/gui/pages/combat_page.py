@@ -4,7 +4,7 @@ Combat page with properly structured tabs and repaired TeleporterTab (OCR scan f
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QLabel, QPushButton, 
-    QHBoxLayout, QMessageBox, QInputDialog, QCheckBox, QSpinBox
+    QHBoxLayout, QMessageBox, QInputDialog, QCheckBox, QSpinBox, QComboBox
 )
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QPixmap, QImage
@@ -151,6 +151,12 @@ class TeleporterTab(QWidget):
         self.channel_spin.setPrefix("Channels: ")
         btn_layout.addWidget(self.channel_spin)
 
+        # OCR Device Selection
+        self.device_combo = QComboBox()
+        self.device_combo.addItems(["CPU", "GPU (CUDA)", "GPU (DirectML)"])
+        self.device_combo.setCurrentText("CPU") # Default to CPU
+        btn_layout.addWidget(self.device_combo)
+
         btn_select_icon = QPushButton("Setup Scroll Icon")
         btn_select_icon.clicked.connect(self.setup_scroll_icon)
         btn_layout.addWidget(btn_select_icon)
@@ -168,9 +174,10 @@ class TeleporterTab(QWidget):
             priority_list = self.map_list.get_checked_items()
             click_enabled = self.click_checkbox.isChecked()
             num_channels = self.channel_spin.value()
-            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}")
+            ocr_backend = self.device_combo.currentText()
+            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}, backend: {ocr_backend}")
             
-            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels)
+            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels, ocr_backend=ocr_backend)
             self.toggle_btn.setText("Stop Detection")
             self.status_label.setText("Status: Running")
         else:
@@ -306,7 +313,7 @@ class TeleporterTab(QWidget):
                 screenshot = np.array(sct.grab(roi_region))
             screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
 
-            r = cv2.selectROI("Select Scroll Icon (ROI)", screenshot, False, True)
+            r = cv2.selectROI("Select Scroll Icon (ROI)", screenshot, showCrosshair=True, fromCenter=False)
             cv2.destroyWindow("Select Scroll Icon (ROI)")
 
             if r == (0, 0, 0, 0):
