@@ -41,9 +41,24 @@ class BossDetectionWorker(QThread):
         super().__init__()
         self.config = config
         self.map_priority = config.get("map_priority", [])
+        self.click_enabled = config.get("click_enabled", False)
         self.ocr = RapidOCR()
         self.should_stop = False
         self.paused = False
+        
+        # State Machine
+        self.checked_maps = {}  # {map_name: timestamp}
+        self.CHECK_COOLDOWN = 10.0  # Seconds before checking the same map again
+        self.state = "SCANNING"  # SCANNING, WAITING_FOR_BOSS_LIST, CHECKING_BOSSES
+        self.state_timer = 0
+        self.current_map_name = None
+        self.locked_boss_roi = None
+        self.boss_status_change_counter = 0
+        
+        # Channel Logic
+        self.num_channels = config.get("num_channels", 1)
+        self.current_channel = 1
+        self.channel_switch_time = 0
 
         # DXCam instance
         self.camera = None
@@ -71,6 +86,7 @@ class BossDetectionWorker(QThread):
         self.detected_roi = None
         self.last_roi_update_time = 0
         self.last_scroll_time = 0
+        self.last_scroll_finish_time = 0
         self.last_target_found_time = 0
         self.scroll_count = 0
         self.scroll_direction = 1  # 1 for down, -1 for up
@@ -224,110 +240,252 @@ class BossDetectionWorker(QThread):
             if now - self.last_ocr_time >= OCR_INTERVAL:
                 threading.Thread(
                     target=self._run_ocr,
-                    args=(processed.copy(),),
+                    args=(processed.copy(), now),
                     daemon=True
                 ).start()
                 self.last_ocr_time = now
             
-            # 6.5 Scroll Logic (if no target map found)
+            # 6.5 State Machine Logic
             if self.latest_ocr_result and self.map_priority:
-                # Find the highest priority map that is currently visible
-                found_target = False
-                found_priority_index = None
-                visible_texts = [res[1] for res in self.latest_ocr_result]
                 
-                # Iterate through priority list in order (first = highest priority)
-                for idx, priority_map in enumerate(self.map_priority):
-                    for text in visible_texts:
-                        ratio = Levenshtein.ratio(text.lower(), priority_map.lower())
+                # --- STATE: SCANNING ---
+                if self.state == "SCANNING":
+                    # Clean up old checked maps
+                    now = time.time()
+                    expired = [k for k, v in self.checked_maps.items() if now - v > self.CHECK_COOLDOWN]
+                    for k in expired:
+                        del self.checked_maps[k]
+
+                    found_target = False
+                    found_priority_index = None
+                    
+                    # Iterate through priority list in order
+                    for idx, priority_map in enumerate(self.map_priority):
+                        # Skip if recently checked
+                        if priority_map in self.checked_maps:
+                            continue
+
+                        for box, text, conf in self.latest_ocr_result:
+                            ratio = Levenshtein.ratio(text.lower(), priority_map.lower())
+                            
+                            if ratio > 0.6:
+                                # Improved version/number matching
+                                import re
+                                text_nums = re.findall(r'\d+', text)
+                                map_nums = re.findall(r'\d+', priority_map)
+                                
+                                if map_nums:
+                                    if not text_nums: continue
+                                    if text_nums[-1] != map_nums[-1]: continue
+                                
+                                # Found a valid match
+                                if found_priority_index is None or idx < found_priority_index:
+                                    found_priority_index = idx
+                                    found_target = True
+                                    self.last_target_found_time = time.time()
+                                    print(f"Target map '{priority_map}' found at priority {idx} (matched OCR: '{text}')")
+                                    
+                                    if self.click_enabled:
+                                        try:
+                                            # Click logic
+                                            center_x = int(np.mean([p[0] for p in box]))
+                                            center_y = int(np.mean([p[1] for p in box]))
+                                            
+                                            if SCALE_FACTOR != 1.0:
+                                                center_x = int(center_x / SCALE_FACTOR)
+                                                center_y = int(center_y / SCALE_FACTOR)
+                                                
+                                            click_x = region[0] + center_x
+                                            click_y = region[1] + center_y
+                                            
+                                            print(f"Clicking on map '{priority_map}' at ({click_x}, {click_y})")
+                                            pyautogui.moveTo(click_x, click_y)
+                                            pyautogui.click()
+                                            
+                                            # Update state
+                                            self.checked_maps[priority_map] = now
+                                            self.current_map_name = priority_map
+                                            self.state = "WAITING_FOR_BOSS_LIST"
+                                            self.state_timer = now
+                                        except Exception as e:
+                                            print(f"Click error: {e}")
+                                break
                         
-                        if ratio > 0.6:
-                            # Found a potential match based on string similarity
-                            
-                            # Improved version/number matching
-                            import re
-                            # Extract all sequences of digits
-                            text_nums = re.findall(r'\d+', text)
-                            map_nums = re.findall(r'\d+', priority_map)
-                            
-                            # If the priority map expects a number (e.g. V2, V3), ensure the text has it
-                            if map_nums:
-                                if not text_nums:
-                                    continue # Map has number, text doesn't -> skip
-                                # Check if the LAST number matches (usually the version)
-                                if text_nums[-1] != map_nums[-1]:
-                                    continue # Numbers don't match
-                            
-                            # Found a valid match - check if it's the highest priority so far
-                            if found_priority_index is None or idx < found_priority_index:
-                                found_priority_index = idx
-                                found_target = True
-                                self.last_target_found_time = time.time()
-                                print(f"Target map '{priority_map}' found at priority {idx} (matched OCR: '{text}')")
+                        if found_target:
                             break
                     
-                    # Stop searching if we found a match - we want the first (highest priority) match
-                    if found_target:
-                        break
-                
-                # Only scroll if we haven't found the target recently (debounce)
-                if not found_target and (now - self.last_target_found_time > 2.0) and self.scroll_template is not None:
-                    # Target map not found, try to scroll
-                    try:
-                        # frame is BGR, template is BGR
-                        search_img = frame
-                        offset_x, offset_y = 0, 0
-                        
-                        # Search the entire frame (ROI) for the scroll icon
-                        res = cv2.matchTemplate(search_img, self.scroll_template, cv2.TM_CCOEFF_NORMED)
-                        
-                        # Find all locations above threshold (there may be multiple scrollbars)
-                        threshold = 0.7
-                        locations = np.where(res >= threshold)
-                        
-                        if len(locations[0]) > 0:
-                            # Find all matches
-                            matches = list(zip(*locations[::-1]))  # Switch x and y
+                    # Scroll logic (only if we didn't find a target to click)
+                    if not found_target and (now - self.last_target_found_time > 2.0) and self.scroll_template is not None:
+                        try:
+                            search_img = frame
+                            res = cv2.matchTemplate(search_img, self.scroll_template, cv2.TM_CCOEFF_NORMED)
+                            threshold = 0.7
+                            locations = np.where(res >= threshold)
                             
-                            if matches:
-                                # Choose the leftmost scroll icon (nearest to map names)
-                                leftmost_match = min(matches, key=lambda loc: loc[0])
-                                max_loc = leftmost_match
-                                max_val = res[leftmost_match[1], leftmost_match[0]]
-                                
-                                print(f"DEBUG: Found {len(matches)} scroll icons, using leftmost at {max_loc} (val: {max_val:.2f})")
-                                
-                                # Calculate absolute coordinates
-                                local_x = offset_x + max_loc[0] + self.scroll_template.shape[1] // 2
-                                local_y = offset_y + max_loc[1] + self.scroll_template.shape[0] // 2
-                                
-                                icon_x = region[0] + local_x
-                                icon_y = region[1] + local_y
-                                
-                                # Only scroll if we haven't scrolled recently to avoid spam
-                                if now - self.last_scroll_time > 1.0:
-                                    # Determine scroll direction based on count
-                                    if self.scroll_count >= 8:
-                                        # Reverse direction
-                                        self.scroll_direction *= -1
-                                        self.scroll_count = 0
-                                        print(f"Reversing scroll direction")
+                            if len(locations[0]) > 0:
+                                matches = list(zip(*locations[::-1]))
+                                if matches:
+                                    leftmost_match = min(matches, key=lambda loc: loc[0])
+                                    max_loc = leftmost_match
                                     
-                                    scroll_distance = 35 * self.scroll_direction
+                                    local_x = max_loc[0] + self.scroll_template.shape[1] // 2
+                                    local_y = max_loc[1] + self.scroll_template.shape[0] // 2
+                                    icon_x = region[0] + local_x
+                                    icon_y = region[1] + local_y
                                     
-                                    print(f"Scroll icon detected. Dragging at ({icon_x}, {icon_y}), distance: {scroll_distance}")
-                                    pyautogui.moveTo(icon_x, icon_y)
-                                    pyautogui.dragRel(0, scroll_distance, duration=0.5, button='left')
-                                    self.last_scroll_time = now
-                                    self.scroll_count += 1
-                        else:
-                            # Fallback to max location if no matches above threshold
-                            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-                            if max_val > threshold:
-                                print(f"DEBUG: Single scroll detection max_val: {max_val:.2f} at {max_loc}")
+                                    if now - self.last_scroll_time > 1.0:
+                                        if self.scroll_count >= 8:
+                                            self.scroll_direction *= -1
+                                            self.scroll_count = 0
+                                            print(f"Reversing scroll direction")
+                                        
+                                        scroll_distance = 35 * self.scroll_direction
+                                        print(f"Scrolling... ({scroll_distance})")
+                                        pyautogui.moveTo(icon_x, icon_y)
+                                        pyautogui.dragRel(0, scroll_distance, duration=0.5, button='left')
+                                        self.last_scroll_time = now
+                                        self.last_scroll_finish_time = time.time()
+                                        self.latest_ocr_result = None
+                                        self.scroll_count += 1
+                        except Exception as e:
+                            print(f"Scroll logic error: {e}")
+
+                # --- STATE: WAITING_FOR_BOSS_LIST ---
+                elif self.state == "WAITING_FOR_BOSS_LIST":
+                    if time.time() - self.state_timer > 0.5: # Wait 500ms
+                        self.state = "CHECKING_BOSSES"
+                        self.state_timer = time.time()
+                        print(f"State -> CHECKING_BOSSES")
+
+                # --- STATE: CHECKING_BOSSES ---
+                elif self.state == "CHECKING_BOSSES":
+                    # Ensure we have fresh OCR results
+                    if self.last_ocr_time > self.state_timer:
+                        found_boss = False
+                        for box, text, conf in self.latest_ocr_result:
+                            # Check for "Dostępny"
+                            if "stępn" in text.lower() or Levenshtein.ratio(text.lower(), "dostępny") > 0.7:
+                                try:
+                                    # Calculate click position (Right edge + 20px)
+                                    # box is [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+                                    xs = [p[0] for p in box]
+                                    ys = [p[1] for p in box]
+                                    
+                                    min_x, max_x = min(xs), max(xs)
+                                    min_y, max_y = min(ys), max(ys)
+                                    
+                                    center_y = int(np.mean(ys))
+                                    
+                                    # Target: 20px to the right of the text
+                                    target_x = int(max_x + 20)
+                                    target_y = center_y
+                                    
+                                    if SCALE_FACTOR != 1.0:
+                                        target_x = int(target_x / SCALE_FACTOR)
+                                        target_y = int(target_y / SCALE_FACTOR)
+                                        
+                                    click_x = region[0] + target_x
+                                    click_y = region[1] + target_y
+                                    
+                                    print(f"Found 'Dostępny' boss, clicking Teleport at ({click_x}, {click_y})")
+                                    pyautogui.moveTo(click_x, click_y)
+                                    pyautogui.click()
+                                    
+                                    found_boss = True
+                                    
+                                    # Lock onto this boss
+                                    self.state = "MONITORING_BOSS"
+                                    self.locked_boss_roi = {
+                                        "min_x": min_x, "max_x": max_x,
+                                        "min_y": min_y, "max_y": max_y,
+                                        "text": text
+                                    }
+                                    self.boss_status_change_counter = 0
+                                    self.state_timer = time.time()
+                                    print(f"Locked onto boss. Monitoring for status change...")
+                                except Exception as e:
+                                    print(f"Click boss error: {e}")
+                                break
                         
-                    except Exception as e:
-                        print(f"Scroll logic error: {e}")
+                        if not found_boss:
+                            # Timeout - No more bosses found
+                            if time.time() - self.state_timer > 2.0:
+                                print(f"No available bosses found on {self.current_map_name} (Channel {self.current_channel})")
+                                
+                                # Check if we have more channels to check for this map
+                                if self.current_channel < self.num_channels:
+                                    self.state = "CHANGING_CHANNEL"
+                                    self.current_channel += 1
+                                    self.state_timer = time.time()
+                                else:
+                                    # All channels checked for this map, move to next map
+                                    print(f"Finished checking all channels for {self.current_map_name}. Returning to Map Scan.")
+                                    self.current_channel = 1 # Reset for next map
+                                    self.state = "SCANNING"
+
+                # --- STATE: MONITORING_BOSS ---
+                elif self.state == "MONITORING_BOSS":
+                    # Check if the locked boss status has changed
+                    if self.latest_ocr_result:
+                        # Look for "Dostępny" in the locked ROI
+                        is_still_available = False
+                        
+                        # Define a tolerance for position shifts (e.g. 10px)
+                        TOLERANCE = 10
+                        
+                        for box, text, conf in self.latest_ocr_result:
+                            # Check if this text block overlaps with our locked ROI
+                            xs = [p[0] for p in box]
+                            ys = [p[1] for p in box]
+                            curr_min_y, curr_max_y = min(ys), max(ys)
+                            
+                            # Check vertical overlap
+                            if (curr_min_y < self.locked_boss_roi["max_y"] + TOLERANCE and 
+                                curr_max_y > self.locked_boss_roi["min_y"] - TOLERANCE):
+                                
+                                # Check if text is "Dostępny"
+                                if "stępn" in text.lower() or Levenshtein.ratio(text.lower(), "dostępny") > 0.7:
+                                    is_still_available = True
+                                    break
+                        
+                        if not is_still_available:
+                            self.boss_status_change_counter += 1
+                            # print(f"Boss status might have changed... ({self.boss_status_change_counter}/5)")
+                        else:
+                            self.boss_status_change_counter = 0 # Reset if we see it again
+                            
+                        # If status changed consistently for ~1.5 seconds (approx 5 frames at 0.35s interval)
+                        if self.boss_status_change_counter >= 5:
+                            print("Boss status changed (confirmed). Switching to next boss.")
+                            self.state = "CHECKING_BOSSES"
+                            self.state_timer = time.time()
+                            self.boss_status_change_counter = 0
+
+                # --- STATE: CHANGING_CHANNEL ---
+                elif self.state == "CHANGING_CHANNEL":
+                    # Wait a bit before typing
+                    if time.time() - self.state_timer > 1.0:
+                        print(f"Switching to Channel {self.current_channel}...")
+                        try:
+                            pyautogui.press('enter')
+                            time.sleep(0.1)
+                            pyautogui.write(f'/ch {self.current_channel}')
+                            time.sleep(0.1)
+                            pyautogui.press('enter')
+                            
+                            # Wait for channel switch (e.g. 3 seconds)
+                            # In a real scenario, we might want to detect a loading screen or similar
+                            # For now, fixed delay
+                            time.sleep(3.0)
+                            
+                            # After switch, go back to checking bosses on this map
+                            self.state = "WAITING_FOR_BOSS_LIST" # Wait for list to refresh
+                            self.state_timer = time.time()
+                            print(f"Channel switched. Waiting for boss list...")
+                            
+                        except Exception as e:
+                            print(f"Channel switch error: {e}")
+                            self.state = "SCANNING" # Abort to safe state
 
             # 7. Display preview
             display_frame = frame.copy()
@@ -367,7 +525,7 @@ class BossDetectionWorker(QThread):
             del self.camera 
         cv2.destroyAllWindows()
 
-    def _run_ocr(self, img):
+    def _run_ocr(self, img, timestamp):
         ocr_start = time.time()
         try:
             result, _ = self.ocr(img)
@@ -392,7 +550,11 @@ class BossDetectionWorker(QThread):
         self.last_ocr_ms = ocr_ms
 
         with self.ocr_lock:
-            self.latest_ocr_result = result
+            if timestamp > self.last_scroll_finish_time:
+                self.latest_ocr_result = result
+            else:
+                # print("Discarding stale OCR result from before scroll")
+                pass
 
     def stop(self):
         self.should_stop = True

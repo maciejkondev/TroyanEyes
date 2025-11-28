@@ -30,11 +30,13 @@ class BossFarmingManager(QObject):
         self.boss_worker = None
         self.hotkey_listener = None
 
-    def start_boss_farming(self, priority_list=None) -> Optional[Any]:
+    def start_boss_farming(self, priority_list=None, click_enabled=False, num_channels=1) -> Optional[Any]:
         from gui.controllers.boss_worker import BossDetectionWorker
         config = {}
         if priority_list:
             config["map_priority"] = priority_list
+        config["click_enabled"] = click_enabled
+        config["num_channels"] = num_channels
             
         self.boss_worker = BossDetectionWorker(config)
         self.boss_worker.start()

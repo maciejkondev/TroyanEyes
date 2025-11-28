@@ -4,7 +4,7 @@ Combat page with properly structured tabs and repaired TeleporterTab (OCR scan f
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QLabel, QPushButton, 
-    QHBoxLayout, QMessageBox, QInputDialog
+    QHBoxLayout, QMessageBox, QInputDialog, QCheckBox, QSpinBox
 )
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QPixmap, QImage
@@ -141,6 +141,16 @@ class TeleporterTab(QWidget):
         btn_scan.clicked.connect(self.scan_maps)
         btn_layout.addWidget(btn_scan)
 
+        self.click_checkbox = QCheckBox("Click on Found Map")
+        btn_layout.addWidget(self.click_checkbox)
+
+        # Channel Count Input
+        self.channel_spin = QSpinBox()
+        self.channel_spin.setRange(1, 8)
+        self.channel_spin.setValue(1)
+        self.channel_spin.setPrefix("Channels: ")
+        btn_layout.addWidget(self.channel_spin)
+
         btn_select_icon = QPushButton("Setup Scroll Icon")
         btn_select_icon.clicked.connect(self.setup_scroll_icon)
         btn_layout.addWidget(btn_select_icon)
@@ -156,9 +166,11 @@ class TeleporterTab(QWidget):
     def toggle_farming(self):
         if self.toggle_btn.text() == "Start Detection":
             priority_list = self.map_list.get_checked_items()
-            print(f"Starting with priority: {priority_list}")
+            click_enabled = self.click_checkbox.isChecked()
+            num_channels = self.channel_spin.value()
+            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}")
             
-            self.manager.start_boss_farming(priority_list)
+            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels)
             self.toggle_btn.setText("Stop Detection")
             self.status_label.setText("Status: Running")
         else:
