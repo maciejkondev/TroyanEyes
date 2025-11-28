@@ -115,7 +115,7 @@ jobs:
       - name: Build TroyanEyes.exe
         shell: pwsh
         run: |
-          pyinstaller --onefile --noconsole --collect-all rapidocr_onnxruntime --name TroyanEyes src/main.py
+          pyinstaller --onefile --collect-all rapidocr_onnxruntime --name TroyanEyes src/main.py
           New-Item -ItemType Directory -Force -Path build
           Copy-Item -Force "dist/TroyanEyes.exe" "build/TroyanEyes.exe"
 

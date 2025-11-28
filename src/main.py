@@ -3,6 +3,9 @@
 import sys
 import os
 
+# Suppress Qt DPI awareness warning/error
+# os.environ["QT_QPA_PLATFORM"] = "windows:dpiawareness=1"
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
@@ -12,12 +15,11 @@ if getattr(sys, 'frozen', False):
     base_path = sys._MEIPASS
     sys.path.append(base_path)
 
-# Import the MainWindow class from main_window.py
-from gui.windows.main_window import MainWindow
-
-
 def main():
     app = QApplication(sys.argv)
+    
+    # Import MainWindow AFTER QApplication to avoid DPI context conflicts (e.g. with OpenCV)
+    from gui.windows.main_window import MainWindow
     
     # Create and show the MainWindow
     window = MainWindow()

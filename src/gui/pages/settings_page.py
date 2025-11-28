@@ -157,10 +157,11 @@ class SettingsPage(QWidget):
                 color: white;
                 padding: 8px 10px;
                 border-radius: 6px;
-                border: 1px solid #444;
+                border: none;
             }
+
             QLineEdit:focus {
-                border: 1px solid #5e9cff;
+                background: #333333;
             }
         """)
         hotkey_layout.addWidget(self.hotkey_input)

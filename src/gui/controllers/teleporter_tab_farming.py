@@ -32,7 +32,7 @@ class BossFarmingManager(QObject):
         self.cached_templates = {}
 
     def start_boss_farming(self, priority_list=None, click_enabled=False, num_channels=1, ocr_backend="CPU", pelerynka_key="F1", show_preview=True) -> Optional[Any]:
-        from gui.controllers.boss_worker import BossDetectionWorker
+        from gui.controllers.teleporter_tab_worker import BossDetectionWorker
         config = {}
         if priority_list:
             config["map_priority"] = priority_list

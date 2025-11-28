@@ -6,10 +6,12 @@ from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel,
                                QProgressBar, QPushButton, QMessageBox)
 from PySide6.QtCore import QThread, Signal, Qt
 
+
+
 # Configuration
 GITHUB_API_URL = "https://api.github.com/repos/maciejkondev/TroyanEyes/releases"
 TARGET_DIR = "."
-REQUIRED_FILES = ["TroyanEyes.exe", "TEPatcher.exe", "model.pt"]
+REQUIRED_FILES = ["TroyanEyes.exe", "TEPatcher.exe", "summon_window.pt"]
 CURRENT_EXE = os.path.basename(sys.argv[0]).lower()
 
 class DownloadWorker(QThread):
@@ -74,12 +76,12 @@ class DownloadWorker(QThread):
                 # Determine save path
                 save_path = os.path.join(TARGET_DIR, target_file)
                 
-                # Special handling for model.pt
-                if target_file == "model.pt":
+                # Special handling for summon_window.pt
+                if target_file == "summon_window.pt":
                     possible_paths = [
-                        os.path.join(TARGET_DIR, "data", "weights", "model.pt"),
-                        os.path.join(TARGET_DIR, "src", "data", "weights", "model.pt"),
-                        os.path.join(TARGET_DIR, "_internal", "data", "weights", "model.pt"), # PyInstaller one-dir
+                        os.path.join(TARGET_DIR, "data", "weights", "summon_window.pt"),
+                        os.path.join(TARGET_DIR, "src", "data", "weights", "summon_window.pt"),
+                        os.path.join(TARGET_DIR, "_internal", "data", "weights", "summon_window.pt"), # PyInstaller one-dir
                     ]
                     for p in possible_paths:
                         # If directory exists, assume that's the target (even if file doesn't exist yet)

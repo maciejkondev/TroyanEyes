@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QPixmap, QImage
 
-from gui.controllers.boss_farming import BossFarmingManager
-from gui.controllers.boss_worker import RELATIVE_ROI
+from gui.controllers.teleporter_tab_farming import BossFarmingManager
+from gui.controllers.teleporter_tab_worker import RELATIVE_ROI
 from gui.widgets.draggable_list import DraggableListWidget
 
 import Levenshtein
@@ -70,9 +70,11 @@ class combat_page(QWidget):
         for i in range(self.layout().count()):
             widget = self.layout().itemAt(i).widget()
             if isinstance(widget, QTabWidget):
-                teleporter = widget.widget(0)
-                if isinstance(teleporter, TeleporterTab) and hasattr(teleporter, "stop_detection"):
-                    teleporter.stop_detection()
+                # Iterate through all tabs
+                for tab_index in range(widget.count()):
+                    tab = widget.widget(tab_index)
+                    if hasattr(tab, "stop_detection"):
+                        tab.stop_detection()
 
 
 ##############################################
@@ -89,7 +91,7 @@ class TeleporterTab(QWidget):
         self.yolo_model = None
         try:
             from ultralytics import YOLO
-            model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'weights', 'model.pt'))
+            model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'weights', 'summon_window.pt'))
             if os.path.exists(model_path):
                 self.yolo_model = YOLO(model_path)
                 print(f"YOLO model loaded for map scanning: {model_path}")
@@ -149,13 +151,18 @@ class TeleporterTab(QWidget):
         self.channel_spin.setRange(1, 8)
         self.channel_spin.setValue(1)
         self.channel_spin.setPrefix("Channels: ")
+        self.channel_spin.setStyleSheet("""
+            QSpinBox {
+                background: #2b2b2b;
+                color: white;
+                padding: 5px;
+                border: none;
+                border-radius: 4px;
+            }
+        """)
         btn_layout.addWidget(self.channel_spin)
 
-        # OCR Device Selection
-        self.device_combo = QComboBox()
-        self.device_combo.addItems(["CPU", "GPU (CUDA)", "GPU (DirectML)"])
-        self.device_combo.setCurrentText("CPU") # Default to CPU
-        btn_layout.addWidget(self.device_combo)
+
 
         # Pelerynka Key Selection
         lbl_cape = QLabel("Summoning Cape Key:")
@@ -163,6 +170,18 @@ class TeleporterTab(QWidget):
         self.key_combo = QComboBox()
         self.key_combo.addItems(["F1", "F2", "F3", "F4"])
         self.key_combo.setCurrentText("F1")
+        self.key_combo.setStyleSheet("""
+            QComboBox {
+                background: #2b2b2b;
+                color: white;
+                padding: 5px;
+                border: none;
+                border-radius: 4px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+        """)
         btn_layout.addWidget(self.key_combo)
 
         btn_select_icon = QPushButton("Setup Scroll Icon")
@@ -174,6 +193,7 @@ class TeleporterTab(QWidget):
         btn_layout.addWidget(self.preview_checkbox)
 
         self.toggle_btn = QPushButton("Start Detection")
+        self.toggle_btn.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
         self.toggle_btn.clicked.connect(self.toggle_farming)
         btn_layout.addWidget(self.toggle_btn)
 
@@ -186,23 +206,26 @@ class TeleporterTab(QWidget):
             priority_list = self.map_list.get_checked_items()
             click_enabled = self.click_checkbox.isChecked()
             num_channels = self.channel_spin.value()
-            ocr_backend = self.device_combo.currentText()
             pelerynka_key = self.key_combo.currentText()
             show_preview = self.preview_checkbox.isChecked()
-            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}, backend: {ocr_backend}, key: {pelerynka_key}, preview: {show_preview}")
+            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}, key: {pelerynka_key}, preview: {show_preview}")
             
-            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels, ocr_backend=ocr_backend, pelerynka_key=pelerynka_key, show_preview=show_preview)
+            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels, pelerynka_key=pelerynka_key, show_preview=show_preview)
             self.toggle_btn.setText("Stop Detection")
+            self.toggle_btn.setStyleSheet("background-color: #e74c3c; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
             self.status_label.setText("Status: Running")
         else:
             self.manager.stop_boss_farming()
             self.toggle_btn.setText("Start Detection")
+            self.toggle_btn.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
             self.status_label.setText("Status: Stopped")
     
     def stop_detection(self):
         if self.manager:
             self.manager.stop_boss_farming()
+            self.manager.stop_boss_farming()
             self.toggle_btn.setText("Start Detection")
+            self.toggle_btn.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
             self.status_label.setText("Status: Emergency Stopped")
 
     ##############################################
@@ -355,7 +378,6 @@ class TeleporterTab(QWidget):
         self.map_list.set_state(data.get("map_list", []))
         self.click_checkbox.setChecked(data.get("click_enabled", False))
         self.channel_spin.setValue(data.get("num_channels", 1))
-        self.device_combo.setCurrentText(data.get("ocr_backend", "CPU"))
         self.key_combo.setCurrentText(data.get("pelerynka_key", "F1"))
         self.preview_checkbox.setChecked(data.get("show_preview", True))
 
@@ -364,7 +386,6 @@ class TeleporterTab(QWidget):
             "map_list": self.map_list.get_state(),
             "click_enabled": self.click_checkbox.isChecked(),
             "num_channels": self.channel_spin.value(),
-            "ocr_backend": self.device_combo.currentText(),
             "pelerynka_key": self.key_combo.currentText(),
             "show_preview": self.preview_checkbox.isChecked()
         }
@@ -384,11 +405,71 @@ class MetinFarmingTab(QWidget):
         self.setLayout(layout)
 
 
+from gui.controllers.boss_tab_farming import BossTabManager
+
 class BossFarmingTab(QWidget):
     def __init__(self):
         super().__init__()
+        self.manager = BossTabManager()
+        self.manager.frame_update.connect(self.update_preview)
+        self.manager.status_update.connect(self.update_status)
+        self.init_ui()
+
+    def init_ui(self):
         layout = QVBoxLayout(self)
-        msg = QLabel("Boss UI will be added here.")
-        msg.setAlignment(Qt.AlignCenter)
-        layout.addWidget(msg)
+        
+        # Status Label
+        self.status_label = QLabel("Status: Idle")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
+        layout.addWidget(self.status_label)
+
+        # Preview Label
+        self.preview_label = QLabel("Preview will appear here")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setMinimumSize(400, 300)
+        self.preview_label.setStyleSheet("background-color: #000; border: 1px solid #333;")
+        layout.addWidget(self.preview_label)
+
+        # Start/Stop Button
+        self.toggle_btn = QPushButton("Start Detection")
+        self.toggle_btn.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
+        self.toggle_btn.clicked.connect(self.toggle_detection)
+        layout.addWidget(self.toggle_btn)
+
+        layout.addStretch()
         self.setLayout(layout)
+
+    def toggle_detection(self):
+        if self.toggle_btn.text() == "Start Detection":
+            self.manager.start_detection()
+            self.toggle_btn.setText("Stop Detection")
+            self.toggle_btn.setStyleSheet("background-color: #e74c3c; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
+            self.status_label.setText("Status: Starting...")
+        else:
+            self.stop_detection()
+
+    def stop_detection(self):
+        self.manager.stop_detection()
+        self.toggle_btn.setText("Start Detection")
+        self.toggle_btn.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
+        self.status_label.setText("Status: Stopped")
+        self.preview_label.setText("Preview stopped")
+        self.preview_label.setPixmap(QPixmap())
+
+    def update_status(self, status):
+        self.status_label.setText(f"Status: {status}")
+
+    def update_preview(self, frame):
+        if frame is None:
+            return
+            
+        # Convert numpy array (BGR) to QImage
+        height, width, channel = frame.shape
+        bytes_per_line = 3 * width
+        q_img = QImage(frame.data, width, height, bytes_per_line, QImage.Format_BGR888)
+        
+        # Scale to fit label
+        pixmap = QPixmap.fromImage(q_img)
+        scaled_pixmap = pixmap.scaled(self.preview_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.preview_label.setPixmap(scaled_pixmap)

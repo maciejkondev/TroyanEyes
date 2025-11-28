@@ -74,7 +74,7 @@ class MainPage(QWidget):
                 background: #2b2b2b;
                 color: white;
                 padding: 5px;
-                border: 1px solid #444;
+                border: none;
                 border-radius: 4px;
                 min-width: 150px;
             }
@@ -138,10 +138,10 @@ class MainPage(QWidget):
                 color: white;
                 padding: 8px 10px;
                 border-radius: 6px;
-                border: 1px solid #444;
+                border: none;
             }
             QLineEdit:focus {
-                border: 1px solid #5e9cff;
+                background: #333333;
             }
         """)
 
@@ -367,10 +367,10 @@ class AutoLoginPage(QWidget):
                 color: white;
                 padding: 8px 10px;
                 border-radius: 6px;
-                border: 1px solid #444;
+                border: none;
             }
             QLineEdit:focus {
-                border: 1px solid #5e9cff;
+                background: #333333;
             }
         """)
         card_layout.addWidget(self.key_sequence_input)
@@ -389,10 +389,10 @@ class AutoLoginPage(QWidget):
                 color: white;
                 padding: 8px 10px;
                 border-radius: 6px;
-                border: 1px solid #444;
+                border: none;
             }
             QLineEdit:focus {
-                border: 1px solid #5e9cff;
+                background: #333333;
             }
         """)
         card_layout.addWidget(self.delay_input)
@@ -411,10 +411,10 @@ class AutoLoginPage(QWidget):
                 color: white;
                 padding: 8px 10px;
                 border-radius: 6px;
-                border: 1px solid #444;
+                border: none;
             }
             QLineEdit:focus {
-                border: 1px solid #5e9cff;
+                background: #333333;
             }
         """)
         card_layout.addWidget(self.key_delay_input)

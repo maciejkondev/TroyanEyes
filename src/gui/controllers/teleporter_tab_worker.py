@@ -122,11 +122,11 @@ class BossDetectionWorker(QThread):
         self.ROI_UPDATE_INTERVAL = 2.0  # Check every 2 seconds
 
         try:
-            # Priority 1: Check for external model.pt in current working directory (for patched/frozen apps)
-            external_model_path = os.path.join(os.getcwd(), "model.pt")
+            # Priority 1: Check for external summon_window.pt in current working directory (for patched/frozen apps)
+            external_model_path = os.path.join(os.getcwd(), "summon_window.pt")
             
             # Priority 2: Bundled path relative to this file
-            bundled_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'weights', 'model.pt'))
+            bundled_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'weights', 'summon_window.pt'))
             
             if os.path.exists(external_model_path):
                 self.model = YOLO(external_model_path)
