@@ -122,13 +122,20 @@ class BossDetectionWorker(QThread):
         self.ROI_UPDATE_INTERVAL = 2.0  # Check every 2 seconds
 
         try:
-            # Path relative to this file: ../../data/weights/model.pt
-            model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'weights', 'model.pt'))
-            if os.path.exists(model_path):
-                self.model = YOLO(model_path)
-                print(f"YOLO model loaded from: {model_path}")
+            # Priority 1: Check for external model.pt in current working directory (for patched/frozen apps)
+            external_model_path = os.path.join(os.getcwd(), "model.pt")
+            
+            # Priority 2: Bundled path relative to this file
+            bundled_model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'weights', 'model.pt'))
+            
+            if os.path.exists(external_model_path):
+                self.model = YOLO(external_model_path)
+                print(f"YOLO model loaded from EXTERNAL path: {external_model_path}")
+            elif os.path.exists(bundled_model_path):
+                self.model = YOLO(bundled_model_path)
+                print(f"YOLO model loaded from BUNDLED path: {bundled_model_path}")
             else:
-                print(f"YOLO model not found at: {model_path}")
+                print(f"YOLO model not found. Checked:\n - {external_model_path}\n - {bundled_model_path}")
         except Exception as e:
             print(f"Failed to load YOLO model: {e}")
 

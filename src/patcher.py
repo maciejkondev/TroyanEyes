@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel,
 from PySide6.QtCore import QThread, Signal, Qt
 
 # Configuration
-GITHUB_API_URL = "https://api.github.com/repos/maciejkondev/TroyanEyes/releases/latest"
+GITHUB_API_URL = "https://api.github.com/repos/maciejkondev/TroyanEyes/releases"
 TARGET_DIR = "."
 REQUIRED_FILES = ["TroyanEyes.exe", "TEPatcher.exe", "model.pt"]
 CURRENT_EXE = os.path.basename(sys.argv[0]).lower()
@@ -20,17 +20,22 @@ class DownloadWorker(QThread):
 
     def run(self):
         try:
-            # 1. Get Release Info
+            # 1. Get Releases Info
             self.log.emit("Checking for updates...")
             try:
                 resp = requests.get(GITHUB_API_URL)
                 resp.raise_for_status()
-                data = resp.json()
+                releases = resp.json()
+                if not releases:
+                    self.error.emit("No releases found.")
+                    return
             except Exception as e:
                 self.error.emit(f"Failed to fetch release info:\n{e}")
                 return
 
-            tag_name = data.get("tag_name", "Unknown")
+            # Assume first one is latest
+            latest_release = releases[0]
+            tag_name = latest_release.get("tag_name", "Unknown")
             self.log.emit(f"Found latest release: {tag_name}")
             self.version_found.emit(tag_name)
 
@@ -39,24 +44,55 @@ class DownloadWorker(QThread):
                 os.makedirs(TARGET_DIR)
 
             # 3. Download Files
-            assets = data.get("assets", [])
             downloaded_count = 0
 
             for target_file in REQUIRED_FILES:
-                # Find asset url
+                # Find asset in releases (newest first)
                 if target_file.lower() == CURRENT_EXE:
                     self.log.emit(f"Skipping {target_file}: cannot update while running.")
                     continue
                 
-                asset = next((a for a in assets if a["name"] == target_file), None)
+                asset = None
+                found_version = None
+                
+                for release in releases:
+                    assets = release.get("assets", [])
+                    found = next((a for a in assets if a["name"] == target_file), None)
+                    if found:
+                        asset = found
+                        found_version = release.get("tag_name")
+                        break
                 
                 if not asset:
-                    self.log.emit(f"Warning: {target_file} not found in release.")
+                    self.log.emit(f"Warning: {target_file} not found in any recent release.")
                     continue
+
+                if found_version != tag_name:
+                     self.log.emit(f"Found {target_file} in release {found_version}")
 
                 download_url = asset["browser_download_url"]
                 remote_size = asset.get("size", 0)
+                
+                # Determine save path
                 save_path = os.path.join(TARGET_DIR, target_file)
+                
+                # Special handling for model.pt to find where it lives
+                if target_file == "model.pt":
+                    possible_paths = [
+                        os.path.join(TARGET_DIR, "data", "weights", "model.pt"),
+                        os.path.join(TARGET_DIR, "src", "data", "weights", "model.pt"),
+                        os.path.join(TARGET_DIR, "_internal", "data", "weights", "model.pt"), # PyInstaller one-dir
+                    ]
+                    for p in possible_paths:
+                        # If directory exists, assume that's the target (even if file doesn't exist yet)
+                        if os.path.exists(os.path.dirname(p)):
+                            save_path = p
+                            break
+                    # If file already exists in a specific location, prefer that
+                    for p in possible_paths:
+                        if os.path.exists(p):
+                            save_path = p
+                            break
                 
                 # Check if file exists and size matches
                 if os.path.exists(save_path):
