@@ -227,6 +227,8 @@ class MainPage(QWidget):
             self.main_window.combat_page.load_settings(data)
         if self.main_window and hasattr(self.main_window, 'autologin_page'):
             self.main_window.autologin_page.load_settings(data)
+        if self.main_window and hasattr(self.main_window, 'settings_page'):
+            self.main_window.settings_page.load_settings(data)
 
     def create_profile(self):
         name, ok = QInputDialog.getText(self, "New Profile", "Profile Name:")
@@ -243,6 +245,8 @@ class MainPage(QWidget):
                 data.update(self.main_window.combat_page.get_settings())
             if self.main_window and hasattr(self.main_window, 'autologin_page'):
                 data.update(self.main_window.autologin_page.get_settings())
+            if self.main_window and hasattr(self.main_window, 'settings_page'):
+                data.update(self.main_window.settings_page.get_settings())
                 
             self.profile_manager.save_profile(name, data)
             self.load_profiles_to_ui()
@@ -261,6 +265,8 @@ class MainPage(QWidget):
             data.update(self.main_window.combat_page.get_settings())
         if self.main_window and hasattr(self.main_window, 'autologin_page'):
             data.update(self.main_window.autologin_page.get_settings())
+        if self.main_window and hasattr(self.main_window, 'settings_page'):
+            data.update(self.main_window.settings_page.get_settings())
             
         self.profile_manager.save_profile(name, data)
         QMessageBox.information(self, "Success", f"Profile '{name}' saved!")
