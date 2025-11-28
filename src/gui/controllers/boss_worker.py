@@ -617,35 +617,6 @@ class BossDetectionWorker(QThread):
                                     click_x = region[0] + target_x
                                     click_y = region[1] + target_y
                                     
-                                    print(f"Found 'Dostępny' boss, clicking Teleport at ({click_x}, {click_y})")
-                                    pyautogui.moveTo(click_x, click_y)
-                                    pyautogui.click()
-                                    
-                                    found_boss = True
-                                    
-                                    # Lock onto this boss
-                                    self.state = "MONITORING_BOSS"
-                                    self.locked_boss_roi = {
-                                        "min_x": min_x, "max_x": max_x,
-                                        "min_y": min_y, "max_y": max_y,
-                                        "text": text
-                                    }
-                                    self.boss_status_change_counter = 0
-                                    self.state_timer = time.time()
-                                    print(f"Locked onto boss. Monitoring for status change...")
-                                except Exception as e:
-                                    print(f"Click boss error: {e}")
-                                break
-                        
-                        if not found_boss:
-                            # Timeout - No more bosses found
-                            if time.time() - self.state_timer > 2.0:
-                                print(f"No available bosses found on {self.current_map_name} (Channel {self.current_channel})")
-                                
-                                # Check if we have more channels to check for this map
-                                if self.current_channel < self.num_channels:
-                                    self.state = "CHANGING_CHANNEL"
-                                    self.current_channel += 1
                                     self.state_timer = time.time()
                                 else:
                                     # All channels checked for this map, move to next map
@@ -690,15 +661,15 @@ class BossDetectionWorker(QThread):
                             
                             # Search for template within this small ROI
                             # If we don't find it, it means the "Dostępny" text is gone (boss taken/despawned)
-                            # Increased threshold to 0.8 to avoid false positives on changed text
-                            rect, conf = self._find_with_template(roi_img, template_key, threshold=0.80)
+                            # Increased threshold to 0.90 to strictly match "Dostępny" and reject timers
+                            rect, conf = self._find_with_template(roi_img, template_key, threshold=0.90)
                             if rect:
                                 is_still_available = True
                                 # print(f"Boss status confirmed via TEMPLATE (conf: {conf:.2f})")
                             else:
                                 # Template not found in the expected spot -> Boss likely gone
                                 is_still_available = False
-                                # print(f"Boss status template mismatch (conf: {conf:.2f} < 0.8)")
+                                # print(f"Boss status template mismatch (conf: {conf:.2f} < 0.90)")
                                 
                         except Exception as e:
                             print(f"Monitoring template error: {e}")
