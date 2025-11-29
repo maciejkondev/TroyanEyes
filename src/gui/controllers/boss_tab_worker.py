@@ -11,6 +11,10 @@ class BossTabWorker(QThread):
     frame_processed = Signal(np.ndarray)
     status_update = Signal(str)
     
+    # Detection settings
+    CONF_THRESHOLD = 0.45
+    IOU_THRESHOLD = 0.45
+    
     def __init__(self):
         super().__init__()
         self.running = False
@@ -64,7 +68,7 @@ class BossTabWorker(QThread):
                 frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
                 
                 # Run inference
-                results = self.model(frame, verbose=False)
+                results = self.model(frame, verbose=False, conf=self.CONF_THRESHOLD, iou=self.IOU_THRESHOLD)
                 
                 # Annotate frame
                 annotated_frame = results[0].plot()
