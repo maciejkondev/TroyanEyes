@@ -2,7 +2,9 @@ import sys
 import os
 import requests
 import subprocess
-from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel, 
+import shutil
+import tempfile
+from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel,
                                QProgressBar, QPushButton, QMessageBox)
 from PySide6.QtCore import QThread, Signal, Qt
 
@@ -13,6 +15,8 @@ GITHUB_API_URL = "https://api.github.com/repos/maciejkondev/TroyanEyes/releases"
 TARGET_DIR = "."
 REQUIRED_FILES = ["TroyanEyes.exe", "TEPatcher.exe", "summon_window.pt", "boss_detector.pt"]
 CURRENT_EXE = os.path.basename(sys.argv[0]).lower()
+TEMP_ROOT = tempfile.gettempdir()
+PERSISTENT_TEMP_DIR = os.path.join(TEMP_ROOT, "TroyanEyes")
 
 class DownloadWorker(QThread):
     progress = Signal(str, int)  # current_file, percent
@@ -177,6 +181,7 @@ class PatcherWindow(QWidget):
         self.resize(400, 250)
         self.init_ui()
         self.cleanup_old_files()
+        self.cleanup_temp_directories()
         self.worker = None
 
     def cleanup_old_files(self):
@@ -189,6 +194,27 @@ class PatcherWindow(QWidget):
                     print(f"Cleaned up {old_path}")
                 except:
                     pass
+
+    def cleanup_temp_directories(self):
+        """Ensure we keep a single stable temp directory and remove stray _MEI folders."""
+        try:
+            if not os.path.exists(PERSISTENT_TEMP_DIR):
+                os.makedirs(PERSISTENT_TEMP_DIR, exist_ok=True)
+
+            current_temp = os.path.abspath(getattr(sys, "_MEIPASS", ""))
+            for entry in os.listdir(TEMP_ROOT):
+                if not entry.startswith("_MEI"):
+                    continue
+
+                candidate = os.path.abspath(os.path.join(TEMP_ROOT, entry))
+                if candidate == current_temp:
+                    continue
+
+                if os.path.isdir(candidate):
+                    shutil.rmtree(candidate, ignore_errors=True)
+        except Exception:
+            # Best-effort cleanup; failure should not block patcher startup
+            pass
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -218,10 +244,18 @@ class PatcherWindow(QWidget):
         self.lbl_log.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.lbl_log)
 
+        self.btn_launch = QPushButton("Start TroyanEyes")
+        self.btn_launch.setMinimumHeight(36)
+        self.btn_launch.clicked.connect(self.start_application)
+        layout.addWidget(self.btn_launch)
+
         layout.addStretch()
+
+        self.update_launch_button_state()
 
     def start_patching(self):
         self.btn_start.setEnabled(False)
+        self.btn_launch.setEnabled(False)
         self.pbar.setValue(0)
         self.lbl_version.setText("Checking version...")
         
@@ -248,12 +282,31 @@ class PatcherWindow(QWidget):
     def handle_error(self, msg):
         QMessageBox.critical(self, "Error", msg)
         self.btn_start.setEnabled(True)
+        self.update_launch_button_state()
         self.lbl_status.setText("Update failed.")
 
     def handle_finished(self):
         self.btn_start.setEnabled(True)
+        self.update_launch_button_state()
         self.lbl_status.setText("Up to date.")
         self.pbar.setValue(100)
+
+    def start_application(self):
+        exe_path = os.path.join(TARGET_DIR, "TroyanEyes.exe")
+        if not os.path.exists(exe_path):
+            QMessageBox.warning(self, "Missing file", "TroyanEyes.exe not found in the current directory.")
+            self.btn_launch.setEnabled(False)
+            return
+
+        try:
+            subprocess.Popen([exe_path], cwd=os.path.abspath(TARGET_DIR))
+            self.lbl_log.setText("Starting TroyanEyes...")
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Failed to start TroyanEyes.exe:\n{e}")
+
+    def update_launch_button_state(self):
+        has_executable = os.path.exists(os.path.join(TARGET_DIR, "TroyanEyes.exe"))
+        self.btn_launch.setEnabled(has_executable)
         
     def handle_restart(self):
         self.lbl_status.setText("Restarting...")
