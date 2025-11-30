@@ -54,7 +54,10 @@ class combat_page(QWidget):
             if isinstance(widget, QTabWidget):
                 teleporter = widget.widget(0)
                 if isinstance(teleporter, TeleporterTab):
-                    teleporter.load_settings(data.get("teleporter", {}))
+                    t_settings = data.get("teleporter", {})
+                    # Inject global channel count setting
+                    t_settings["num_channels"] = data.get("channel_count", 1)
+                    teleporter.load_settings(t_settings)
 
     def get_settings(self):
         settings = {}
@@ -82,8 +85,9 @@ class combat_page(QWidget):
 ##############################################
 
 class TeleporterTab(QWidget):
-    def __init__(self):
+    def __init__(self, main_window=None):
         super().__init__()
+        self.main_window = main_window
         self.manager = BossFarmingManager()
         self.ocr = RapidOCR()
         
@@ -118,6 +122,8 @@ class TeleporterTab(QWidget):
             "Mroczna Krypta V4", 
             "Mroczna Krypta V5"
         ]
+        
+        self.num_channels = 1
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -130,45 +136,35 @@ class TeleporterTab(QWidget):
         lbl = QLabel("Map Priority (Drag to reorder):")
         lbl.setStyleSheet("font-weight: bold; margin-top: 10px;")
         layout.addWidget(lbl)
-
         # Draggable list
         self.map_list = DraggableListWidget()
         self.map_list.setMinimumHeight(200)
         layout.addWidget(self.map_list)
 
-        # Buttons
-        btn_layout = QHBoxLayout()
+        # Controls Layout
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(10)
 
-        btn_scan = QPushButton("Scan Available Maps (OCR)")
+        # Row 1: Actions
+        row1 = QHBoxLayout()
+        btn_scan = QPushButton("Scan Maps")
         btn_scan.clicked.connect(self.scan_maps)
-        btn_layout.addWidget(btn_scan)
+        row1.addWidget(btn_scan)
 
-        self.click_checkbox = QCheckBox("Click on Found Map")
-        btn_layout.addWidget(self.click_checkbox)
+        btn_select_icon = QPushButton("Setup Scroll Icon")
+        btn_select_icon.clicked.connect(self.setup_scroll_icon)
+        row1.addWidget(btn_select_icon)
+        controls_layout.addLayout(row1)
 
-        # Channel Count Input
-        self.channel_spin = QSpinBox()
-        self.channel_spin.setRange(1, 8)
-        self.channel_spin.setValue(1)
-        self.channel_spin.setPrefix("Channels: ")
-        self.channel_spin.setStyleSheet("""
-            QSpinBox {
-                background: #2b2b2b;
-                color: white;
-                padding: 5px;
-                border: none;
-                border-radius: 4px;
-            }
-        """)
-        btn_layout.addWidget(self.channel_spin)
-
-
-
-        # Pelerynka Key Selection
-        lbl_cape = QLabel("Summoning Cape Key:")
-        btn_layout.addWidget(lbl_cape)
+        # Row 2: Settings
+        row2 = QHBoxLayout()
+        
+        # Pelerynka
+        lbl_cape = QLabel("Cape Key:")
+        row2.addWidget(lbl_cape)
+        
         self.key_combo = QComboBox()
-        self.key_combo.addItems(["F1", "F2", "F3", "F4"])
+        self.key_combo.addItems(["F1", "F2", "F3", "F4", "1", "2", "3", "4"])
         self.key_combo.setCurrentText("F1")
         self.key_combo.setStyleSheet("""
             QComboBox {
@@ -177,40 +173,74 @@ class TeleporterTab(QWidget):
                 padding: 5px;
                 border: none;
                 border-radius: 4px;
+                min-width: 50px;
             }
             QComboBox::drop-down {
                 border: none;
             }
         """)
-        btn_layout.addWidget(self.key_combo)
-
-        btn_select_icon = QPushButton("Setup Scroll Icon")
-        btn_select_icon.clicked.connect(self.setup_scroll_icon)
-        btn_layout.addWidget(btn_select_icon)
-
-        self.preview_checkbox = QCheckBox("Show Preview")
+        row2.addWidget(self.key_combo)
+        
+        row2.addStretch()
+        
+        self.preview_checkbox = QCheckBox("Preview")
         self.preview_checkbox.setChecked(True)
-        btn_layout.addWidget(self.preview_checkbox)
+        row2.addWidget(self.preview_checkbox)
+        
+        # Stuck Boss Settings
+        self.ignore_stuck_checkbox = QCheckBox("Ignore Stuck")
+        self.ignore_stuck_checkbox.setChecked(True)
+        row2.addWidget(self.ignore_stuck_checkbox)
 
+        self.stuck_timeout_spin = QSpinBox()
+        self.stuck_timeout_spin.setRange(5, 300)
+        self.stuck_timeout_spin.setValue(30)
+        self.stuck_timeout_spin.setSuffix("s")
+        self.stuck_timeout_spin.setStyleSheet("""
+            QSpinBox {
+                background: #2b2b2b;
+                color: white;
+                padding: 5px;
+                border: none;
+                border-radius: 4px;
+            }
+        """)
+        row2.addWidget(self.stuck_timeout_spin)
+        
+        controls_layout.addLayout(row2)
+
+        # Row 3: Start Button
         self.toggle_btn = QPushButton("Start Detection")
         self.toggle_btn.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
         self.toggle_btn.clicked.connect(self.toggle_farming)
-        btn_layout.addWidget(self.toggle_btn)
+        controls_layout.addWidget(self.toggle_btn)
 
-        layout.addLayout(btn_layout)
+        layout.addLayout(controls_layout)
         layout.addStretch()
         self.setLayout(layout)
 
     def toggle_farming(self):
         if self.toggle_btn.text() == "Start Detection":
             priority_list = self.map_list.get_checked_items()
-            click_enabled = self.click_checkbox.isChecked()
-            num_channels = self.channel_spin.value()
+            # click_enabled is now always True
+            click_enabled = True
+            
+            # Get num_channels and hotkeys from SettingsPage
+            num_channels = 1  # Default
+            channel_hotkeys = {}
+            if hasattr(self, 'main_window') and self.main_window and hasattr(self.main_window, 'settings_page'):
+                settings = self.main_window.settings_page.get_settings()
+                num_channels = settings.get('channel_count', 1)
+                channel_hotkeys = settings.get('channel_hotkeys', {})
+            
             pelerynka_key = self.key_combo.currentText()
             show_preview = self.preview_checkbox.isChecked()
-            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}, key: {pelerynka_key}, preview: {show_preview}")
+            ignore_stuck = self.ignore_stuck_checkbox.isChecked()
+            stuck_timeout = self.stuck_timeout_spin.value()
             
-            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels, pelerynka_key=pelerynka_key, show_preview=show_preview)
+            print(f"Starting with priority: {priority_list}, click_enabled: {click_enabled}, channels: {num_channels}, key: {pelerynka_key}, preview: {show_preview}, hotkeys: {channel_hotkeys}, ignore_stuck: {ignore_stuck}, timeout: {stuck_timeout}")
+            
+            self.manager.start_boss_farming(priority_list, click_enabled=click_enabled, num_channels=num_channels, pelerynka_key=pelerynka_key, show_preview=show_preview, channel_hotkeys=channel_hotkeys, ignore_stuck=ignore_stuck, stuck_timeout=stuck_timeout)
             self.toggle_btn.setText("Stop Detection")
             self.toggle_btn.setStyleSheet("background-color: #e74c3c; color: white; font-weight: bold; font-size: 14px; padding: 10px;")
             self.status_label.setText("Status: Running")
@@ -334,30 +364,71 @@ class TeleporterTab(QWidget):
             return
 
         try:
-            win_left, win_top, _, _ = win_rect
+            win_left, win_top, win_right, win_bottom = win_rect
+            win_width = win_right - win_left
+            win_height = win_bottom - win_top
 
-            roi_left = win_left + RELATIVE_ROI["left"]
-            roi_top = win_top + RELATIVE_ROI["top"]
-
-            roi_region = {
-                "top": int(roi_top),
-                "left": int(roi_left),
-                "width": int(RELATIVE_ROI["width"]),
-                "height": int(RELATIVE_ROI["height"]),
+            # Capture full game window
+            full_region = {
+                "left": win_left,
+                "top": win_top,
+                "width": win_width,
+                "height": win_height
             }
 
             with mss.mss() as sct:
-                screenshot = np.array(sct.grab(roi_region))
-            screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
+                raw = np.array(sct.grab(full_region))
+            full_frame = cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
 
-            r = cv2.selectROI("Select Scroll Icon (ROI)", screenshot, showCrosshair=True, fromCenter=False)
+            roi_frame = None
+            
+            # Try YOLO detection first
+            if self.yolo_model:
+                try:
+                    results = self.yolo_model(full_frame, verbose=False)
+                    if len(results) > 0 and len(results[0].boxes) > 0:
+                        box = results[0].boxes[0]
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        roi_frame = full_frame[y1:y2, x1:x2]
+                        print(f"YOLO detected summon window for setup at: ({x1},{y1}) -> ({x2},{y2})")
+                    else:
+                        print("YOLO: No summon window detected during setup.")
+                except Exception as e:
+                    print(f"YOLO detection error during setup: {e}")
+
+            # Fallback to RELATIVE_ROI
+            if roi_frame is None:
+                roi_left = win_left + RELATIVE_ROI["left"]
+                roi_top = win_top + RELATIVE_ROI["top"]
+                
+                # Adjust to be relative to the captured full_frame for cropping
+                # full_frame is (win_height, win_width)
+                # RELATIVE_ROI is relative to win_left, win_top
+                
+                # We can just crop from full_frame using RELATIVE_ROI coords
+                r_x = int(RELATIVE_ROI["left"])
+                r_y = int(RELATIVE_ROI["top"])
+                r_w = int(RELATIVE_ROI["width"])
+                r_h = int(RELATIVE_ROI["height"])
+                
+                # Ensure bounds
+                r_x = max(0, r_x)
+                r_y = max(0, r_y)
+                r_w = min(win_width - r_x, r_w)
+                r_h = min(win_height - r_y, r_h)
+                
+                roi_frame = full_frame[r_y:r_y+r_h, r_x:r_x+r_w]
+                print("Using fallback RELATIVE_ROI for setup")
+
+            # Show ROI selection
+            r = cv2.selectROI("Select Scroll Icon (ROI)", roi_frame, showCrosshair=True, fromCenter=False)
             cv2.destroyWindow("Select Scroll Icon (ROI)")
 
             if r == (0, 0, 0, 0):
                 return
 
             x, y, w, h = r
-            template = screenshot[y:y+h, x:x+w]
+            template = roi_frame[y:y+h, x:x+w]
 
             # Save to current directory for persistence (Issue 7)
             template_dir = os.path.join(os.getcwd(), "data", "templates")
@@ -379,16 +450,16 @@ class TeleporterTab(QWidget):
 
     def load_settings(self, data):
         self.map_list.set_state(data.get("map_list", []))
-        self.click_checkbox.setChecked(data.get("click_enabled", False))
-        self.channel_spin.setValue(data.get("num_channels", 1))
+        # click_enabled is deprecated, always True
+        self.num_channels = int(data.get("num_channels", 1))
         self.key_combo.setCurrentText(data.get("pelerynka_key", "F1"))
         self.preview_checkbox.setChecked(data.get("show_preview", True))
 
     def get_settings(self):
         return {
             "map_list": self.map_list.get_state(),
-            "click_enabled": self.click_checkbox.isChecked(),
-            "num_channels": self.channel_spin.value(),
+            # click_enabled removed
+            # num_channels is now managed by SettingsPage
             "pelerynka_key": self.key_combo.currentText(),
             "show_preview": self.preview_checkbox.isChecked()
         }
@@ -476,3 +547,9 @@ class BossFarmingTab(QWidget):
         pixmap = QPixmap.fromImage(q_img)
         scaled_pixmap = pixmap.scaled(self.preview_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.preview_label.setPixmap(scaled_pixmap)
+
+def combat_page(main_window=None):
+    tabs = QTabWidget()
+    tabs.addTab(TeleporterTab(main_window=main_window), "Boss Farming")
+    tabs.addTab(BossFarmingTab(), "Metin Farming")
+    return tabs

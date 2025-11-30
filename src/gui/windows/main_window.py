@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QFrame,
     QComboBox,
-    QInputDialog
+    QInputDialog,
+    QSizePolicy
 )
 from PySide6.QtGui import QIcon, QAction
 from PySide6.QtCore import Qt, QTimer
@@ -54,8 +55,8 @@ class MainPage(QWidget):
     def initUI(self):
 
         page_layout = QVBoxLayout()
-        page_layout.setContentsMargins(40, 10, 40, 30)
-        page_layout.setSpacing(25)
+        page_layout.setContentsMargins(20, 10, 20, 20)
+        page_layout.setSpacing(15)
 
         card = Card()
         card_layout = QVBoxLayout()
@@ -224,9 +225,10 @@ class MainPage(QWidget):
         
         # Load settings into other pages
         if self.main_window and hasattr(self.main_window, 'combat_page'):
-            self.main_window.combat_page.load_settings(data)
-        if self.main_window and hasattr(self.main_window, 'autologin_page'):
-            self.main_window.autologin_page.load_settings(data)
+            # combat_page is a QTabWidget, get the first tab (TeleporterTab)
+            teleporter_tab = self.main_window.combat_page.widget(0)
+            if teleporter_tab and hasattr(teleporter_tab, 'load_settings'):
+                teleporter_tab.load_settings(data)
         if self.main_window and hasattr(self.main_window, 'settings_page'):
             self.main_window.settings_page.load_settings(data)
 
@@ -242,9 +244,10 @@ class MainPage(QWidget):
             
             # Include settings from other pages
             if self.main_window and hasattr(self.main_window, 'combat_page'):
-                data.update(self.main_window.combat_page.get_settings())
-            if self.main_window and hasattr(self.main_window, 'autologin_page'):
-                data.update(self.main_window.autologin_page.get_settings())
+                # combat_page is a QTabWidget, get the first tab (TeleporterTab)
+                teleporter_tab = self.main_window.combat_page.widget(0)
+                if teleporter_tab and hasattr(teleporter_tab, 'get_settings'):
+                    data.update(teleporter_tab.get_settings())
             if self.main_window and hasattr(self.main_window, 'settings_page'):
                 data.update(self.main_window.settings_page.get_settings())
                 
@@ -262,9 +265,10 @@ class MainPage(QWidget):
         
         # Include settings from other pages
         if self.main_window and hasattr(self.main_window, 'combat_page'):
-            data.update(self.main_window.combat_page.get_settings())
-        if self.main_window and hasattr(self.main_window, 'autologin_page'):
-            data.update(self.main_window.autologin_page.get_settings())
+            # combat_page is a QTabWidget, get the first tab (TeleporterTab)
+            teleporter_tab = self.main_window.combat_page.widget(0)
+            if teleporter_tab and hasattr(teleporter_tab, 'get_settings'):
+                data.update(teleporter_tab.get_settings())
         if self.main_window and hasattr(self.main_window, 'settings_page'):
             data.update(self.main_window.settings_page.get_settings())
             
@@ -311,8 +315,8 @@ class MainPage(QWidget):
             print(f"Launched: {path} (PID: {self.process.pid})")
             
             # Trigger autologin if configured
-            if self.main_window and hasattr(self.main_window, 'autologin_page'):
-                self.main_window.autologin_page.trigger_autologin()
+            if self.main_window and hasattr(self.main_window, 'settings_page'):
+                self.main_window.settings_page.trigger_autologin()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not run file:\n{e}")
 
@@ -333,217 +337,7 @@ class MainPage(QWidget):
 # --------------------------
 # AutoLogin Page
 # --------------------------
-class AutoLoginPage(QWidget):
-    def __init__(self, main_window=None):
-        super().__init__()
-        self.main_window = main_window
-        self.initUI()
 
-    def initUI(self):
-        page_layout = QVBoxLayout()
-        page_layout.setContentsMargins(40, 10, 40, 30)
-        page_layout.setSpacing(25)
-
-        card = Card()
-        card_layout = QVBoxLayout()
-        card_layout.setContentsMargins(20, 20, 20, 20)
-        card_layout.setSpacing(16)
-
-        # --- Title ---
-        title = QLabel("AutoLogin Configuration")
-        title.setStyleSheet("color: #cccccc; font-size: 18px; font-weight: bold;")
-        card_layout.addWidget(title)
-
-        # --- Key Sequence Input ---
-        key_label = QLabel("Key Sequence (comma-separated):")
-        key_label.setStyleSheet("color: #cccccc; font-size: 14px;")
-        card_layout.addWidget(key_label)
-
-        self.key_sequence_input = QLineEdit()
-        self.key_sequence_input.setPlaceholderText("e.g. {Enter},{Tab},{F1}")
-        self.key_sequence_input.setStyleSheet("""
-            QLineEdit {
-                background: #2b2b2b;
-                color: white;
-                padding: 8px 10px;
-                border-radius: 6px;
-                border: none;
-            }
-            QLineEdit:focus {
-                background: #333333;
-            }
-        """)
-        card_layout.addWidget(self.key_sequence_input)
-
-        # --- Delay Input ---
-        delay_label = QLabel("Delay before sending (seconds):")
-        delay_label.setStyleSheet("color: #cccccc; font-size: 14px;")
-        card_layout.addWidget(delay_label)
-
-        self.delay_input = QLineEdit()
-        self.delay_input.setText("5")
-        self.delay_input.setPlaceholderText("5")
-        self.delay_input.setStyleSheet("""
-            QLineEdit {
-                background: #2b2b2b;
-                color: white;
-                padding: 8px 10px;
-                border-radius: 6px;
-                border: none;
-            }
-            QLineEdit:focus {
-                background: #333333;
-            }
-        """)
-        card_layout.addWidget(self.delay_input)
-
-        # --- Key Delay Input ---
-        key_delay_label = QLabel("Delay between keys (seconds):")
-        key_delay_label.setStyleSheet("color: #cccccc; font-size: 14px;")
-        card_layout.addWidget(key_delay_label)
-
-        self.key_delay_input = QLineEdit()
-        self.key_delay_input.setText("1")
-        self.key_delay_input.setPlaceholderText("1")
-        self.key_delay_input.setStyleSheet("""
-            QLineEdit {
-                background: #2b2b2b;
-                color: white;
-                padding: 8px 10px;
-                border-radius: 6px;
-                border: none;
-            }
-            QLineEdit:focus {
-                background: #333333;
-            }
-        """)
-        card_layout.addWidget(self.key_delay_input)
-
-        # --- Info ---
-        info_label = QLabel(
-            "Keys will be sent to the game window after the specified delay.\n"
-            "Format: {Key},{Key},...\n"
-            "Examples: {Enter}, {Tab}, {Esc}, {F1}, {Space}, etc."
-        )
-        info_label.setStyleSheet("color: #888888; font-size: 11px;")
-        info_label.setAlignment(Qt.AlignCenter)
-        card_layout.addWidget(info_label)
-
-        card_layout.addStretch()
-        card.setLayout(card_layout)
-
-        page_layout.addWidget(card)
-        page_layout.addStretch()
-
-        self.setLayout(page_layout)
-        self.setStyleSheet("background-color: #151515;")
-
-    def get_settings(self):
-        """Return current autologin settings for profile saving."""
-        return {
-            "autologin_key_sequence": self.key_sequence_input.text(),
-            "autologin_delay": self.delay_input.text(),
-            "autologin_key_delay": self.key_delay_input.text()
-        }
-
-    def load_settings(self, data):
-        """Load autologin settings from profile data."""
-        self.key_sequence_input.setText(data.get("autologin_key_sequence", ""))
-        self.delay_input.setText(data.get("autologin_delay", "5"))
-        self.key_delay_input.setText(data.get("autologin_key_delay", "1"))
-
-    def trigger_autologin(self):
-        """Trigger the autologin sequence after the specified delay."""
-        key_sequence = self.key_sequence_input.text().strip()
-        if not key_sequence:
-            return
-        
-        try:
-            delay = int(self.delay_input.text())
-        except ValueError:
-            delay = 5
-        
-        try:
-            key_delay = float(self.key_delay_input.text())
-        except ValueError:
-            key_delay = 1.0
-        
-        # Use QTimer to delay the key sending
-        QTimer.singleShot(delay * 1000, lambda: self.send_keys(key_sequence, key_delay))
-        print(f"AutoLogin: Will send keys '{key_sequence}' in {delay} seconds (key delay: {key_delay}s)")
-
-    def send_keys(self, key_sequence, key_delay=1.0):
-        """Send the key sequence to the active window."""
-        import pyautogui
-        import time
-        import re
-        
-        # Get the game window handle and activate it
-        try:
-            from game_context import game_context
-            import win32gui
-            import win32con
-            
-            # Retry finding the window a few times (it may take time to appear)
-            max_retries = 10
-            for attempt in range(max_retries):
-                if game_context.hwnd:
-                    break
-                print(f"AutoLogin: Waiting for game window (attempt {attempt + 1}/{max_retries})...")
-                time.sleep(0.5)
-                game_context._find_window()
-            
-            if game_context.hwnd:
-                # Bring the game window to the foreground
-                win32gui.ShowWindow(game_context.hwnd, win32con.SW_RESTORE)
-                win32gui.SetForegroundWindow(game_context.hwnd)
-                time.sleep(0.5)  # Give it time to activate
-                print(f"AutoLogin: Game window activated")
-            else:
-                print(f"AutoLogin: Warning - game window not found after {max_retries} attempts")
-                return  # Don't send keys if window not found
-        except Exception as e:
-            print(f"AutoLogin: Error activating window: {e}")
-            return
-        
-        # Extract all {Key} patterns from the sequence
-        key_pattern = re.findall(r'\{([^}]+)\}', key_sequence)
-        print(f"AutoLogin: Sending keys: {key_pattern}")
-        
-        # Import pynput
-        from pynput.keyboard import Controller, Key
-        keyboard = Controller()
-        
-        # Key mapping for pynput
-        key_map = {
-            'F1': Key.f1, 'F2': Key.f2, 'F3': Key.f3, 'F4': Key.f4,
-            'F5': Key.f5, 'F6': Key.f6, 'F7': Key.f7, 'F8': Key.f8,
-            'F9': Key.f9, 'F10': Key.f10, 'F11': Key.f11, 'F12': Key.f12,
-            'Enter': Key.enter, 'Tab': Key.tab, 'Esc': Key.esc, 'Space': Key.space,
-            'Up': Key.up, 'Down': Key.down, 'Left': Key.left, 'Right': Key.right,
-            'Backspace': Key.backspace, 'Delete': Key.delete,
-            'Home': Key.home, 'End': Key.end, 'PageUp': Key.page_up, 'PageDown': Key.page_down,
-        }
-        
-        for key in key_pattern:
-            if key:
-                try:
-                    # Get the pynput key
-                    pynput_key = key_map.get(key, None)
-                    
-                    if pynput_key:
-                        print(f"AutoLogin: Pressing key '{key}'")
-                        keyboard.press(pynput_key)
-                        time.sleep(0.05)
-                        keyboard.release(pynput_key)
-                    else:
-                        # If not in map, try typing it as a character
-                        print(f"AutoLogin: Typing character '{key}'")
-                        keyboard.type(key)
-                    
-                    time.sleep(key_delay)  # Configurable delay between keys
-                except Exception as e:
-                    print(f"AutoLogin: Error sending key '{key}': {e}")
 
 
 # --------------------------
@@ -575,21 +369,20 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("TroyanEyes by maciejkondev")
-        self.setMinimumSize(600, 400)
+        self.setMinimumSize(400, 300)
+        self.resize(500, 550)
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
         self.start_page = MainPage(main_window=self)
-        self.combat_page = combat_page()
+        self.combat_page = combat_page(main_window=self)
         self.exp_page = SimplePage()
-        self.autologin_page = AutoLoginPage(main_window=self)
         self.settings_page = SettingsPage(main_window=self)
 
         self.stack.addWidget(self.start_page)
         self.stack.addWidget(self.combat_page)
         self.stack.addWidget(self.exp_page)
-        self.stack.addWidget(self.autologin_page)
         self.stack.addWidget(self.settings_page)
 
         self.menuBar().hide()
@@ -642,8 +435,18 @@ class MainWindow(QMainWindow):
         self.btn_start = add_button(QIcon(), "Start", 0)
         self.btn_bossing = add_button(QIcon(), "Combat", 1)
         self.btn_exp = add_button(QIcon(), "AutoEXP", 2)
-        self.btn_autologin = add_button(QIcon(), "AutoLogin", 3)
-        self.btn_settings = add_button(QIcon(), "Settings", 4)
+        self.btn_settings = add_button(QIcon(), "Settings", 3)
+
+        # Add spacer to push save button to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar.addWidget(spacer)
+
+        # Add save button on the right
+        self.save_action = QAction("💾 Save", self)
+        self.save_action.setToolTip("Save Current Profile")
+        self.save_action.triggered.connect(self.start_page.save_current_profile)
+        self.toolbar.addAction(self.save_action)
 
         self.btn_start.setChecked(True)
 

@@ -287,10 +287,33 @@ class PatcherWindow(QWidget):
             return
 
         try:
-            subprocess.Popen([str(exe_path)], cwd=TARGET_DIR)
-            self.lbl_status.setText("Launched TroyanEyes.")
+            import ctypes
+            from ctypes import wintypes
+            import win32api
+            import win32con
+            import win32process
+            
+            # Use ShellExecute to run as admin
+            # 'runas' verb triggers the UAC prompt
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None, 
+                "runas", 
+                str(exe_path), 
+                None, 
+                str(TARGET_DIR), 
+                1  # SW_SHOWNORMAL
+            )
+            
+            # ShellExecute returns > 32 on success
+            if ret <= 32:
+                 raise Exception(f"ShellExecute failed with code {ret}")
+                 
+            self.lbl_status.setText("Launched TroyanEyes as Admin.")
+            # Optional: Close patcher after launch
+            # sys.exit(0)
+            
         except Exception as e:
-            QMessageBox.critical(self, "Launch Error", f"Failed to start TroyanEyes.exe:\n{e}")
+            QMessageBox.critical(self, "Launch Error", f"Failed to start TroyanEyes.exe as Admin:\n{e}")
 
 if __name__ == "__main__":
     
