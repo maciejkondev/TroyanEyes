@@ -42,7 +42,8 @@ class BossDetectionWorker(QThread):
         super().__init__()
         self.config = config
         self.map_priority = config.get("map_priority", [])
-        self.click_enabled = config.get("click_enabled", False)
+        # click_enabled is now always True
+        self.click_enabled = True
         self.ocr_backend = config.get("ocr_backend", "CPU")
         self.show_preview = config.get("show_preview", True)
         
@@ -82,6 +83,18 @@ class BossDetectionWorker(QThread):
         self.num_channels = config.get("num_channels", 1)
         self.current_channel = 1
         self.channel_switch_time = 0
+        self.channel_hotkeys = config.get("channel_hotkeys", {})
+        
+        # Key Mapping for pynput
+        from pynput.keyboard import Key
+        self.key_map = {
+            'f1': Key.f1, 'f2': Key.f2, 'f3': Key.f3, 'f4': Key.f4,
+            'f5': Key.f5, 'f6': Key.f6, 'f7': Key.f7, 'f8': Key.f8,
+            'f9': Key.f9, 'f10': Key.f10, 'f11': Key.f11, 'f12': Key.f12,
+            'enter': Key.enter, 'tab': Key.tab, 'esc': Key.esc, 'space': Key.space,
+            'spacebar': Key.space,
+            'up': Key.up, 'down': Key.down, 'left': Key.left, 'right': Key.right,
+        }
 
         self.pelerynka_key = config.get("pelerynka_key", "F1")
         self.space_held = False
@@ -107,11 +120,19 @@ class BossDetectionWorker(QThread):
         # OCR Cycle Control (Issue 3)
         self.ocr_disabled_until_cycle_end = False
         self.entered_map_time = 0
+        self.is_initial_check = False
         
         # Template Revalidation (Issue 9)
         self.last_revalidation_time = 0
         self.REVALIDATION_INTERVAL = 300.0  # 5 minutes
         self.last_target_found_time = 0
+        
+        # Timer Rejection Cache removed (User Request)
+        
+        # Stuck Boss Blacklist (User Request)
+        self.boss_blacklist = {} # {(map, channel, x, y): timestamp}
+        self.ignore_stuck = config.get("ignore_stuck", True)
+        self.stuck_timeout = config.get("stuck_timeout", 30.0)
 
         # Performance metrics
         self.last_ocr_fps = 0.0
@@ -188,6 +209,26 @@ class BossDetectionWorker(QThread):
 
         # Initialize pynput keyboard controller
         self.keyboard = KeyboardController()
+
+    def _is_blacklisted(self, x, y, w, h):
+        """Check if the detected boss region is in the blacklist."""
+        if not self.ignore_stuck:
+            return False
+            
+        cx = int(x + w // 2)
+        cy = int(y + h // 2)
+        
+        # Check grid cells (10x10 pixels)
+        # We check the center cell and neighbors to handle slight jitter
+        grid_x = cx // 10
+        grid_y = cy // 10
+        
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                key = (self.current_map_name, self.current_channel, grid_x + dx, grid_y + dy)
+                if key in self.boss_blacklist:
+                    return True
+        return False
 
     def run(self):
         self.status_changed.emit("Worker started")
@@ -424,21 +465,24 @@ class BossDetectionWorker(QThread):
                             
                             print(f"Target map '{priority_map}' found via TEMPLATE (conf: {conf:.2f})")
                             
-                            if self.click_enabled:
-                                try:
-                                    print(f"Clicking on map '{priority_map}' at ({click_x}, {click_y})")
-                                    pyautogui.moveTo(click_x, click_y)
-                                    time.sleep(np.random.uniform(0.02, 0.03))
-                                    pyautogui.click()
-                                    
-                                    self.checked_maps[priority_map] = now
-                                    self.current_map_name = priority_map
-                                    self.state = "WAITING_FOR_BOSS_LIST"
-                                    self.state_timer = now
-                                    found_target = True
-                                    self.last_target_found_time = time.time()
-                                except Exception as e:
-                                    print(f"Click error: {e}")
+                            print(f"Target map '{priority_map}' found via TEMPLATE (conf: {conf:.2f})")
+                            
+                            try:
+                                print(f"Clicking on map '{priority_map}' at ({click_x}, {click_y})")
+                                pyautogui.moveTo(click_x, click_y)
+                                time.sleep(np.random.uniform(0.02, 0.03))
+                                pyautogui.click()
+                                
+                                self.checked_maps[priority_map] = now
+                                self.current_map_name = priority_map
+                                self.state = "WAITING_FOR_BOSS_LIST"
+                                self.state_timer = now
+                                self.current_channel = 1
+                                self.is_initial_check = True
+                                found_target = True
+                                self.last_target_found_time = time.time()
+                            except Exception as e:
+                                print(f"Click error: {e}")
                             break
 
                         # --- SLOW PATH: OCR ---
@@ -485,31 +529,35 @@ class BossDetectionWorker(QThread):
                                     except Exception as e:
                                         print(f"Failed to cache template: {e}")
                                     
-                                    if self.click_enabled:
-                                        try:
-                                            # Click logic
-                                            center_x = int(np.mean([p[0] for p in box]))
-                                            center_y = int(np.mean([p[1] for p in box]))
+                                    except Exception as e:
+                                        print(f"Failed to cache template: {e}")
+                                    
+                                    try:
+                                        # Click logic
+                                        center_x = int(np.mean([p[0] for p in box]))
+                                        center_y = int(np.mean([p[1] for p in box]))
+                                        
+                                        if SCALE_FACTOR != 1.0:
+                                            center_x = int(center_x / SCALE_FACTOR)
+                                            center_y = int(center_y / SCALE_FACTOR)
                                             
-                                            if SCALE_FACTOR != 1.0:
-                                                center_x = int(center_x / SCALE_FACTOR)
-                                                center_y = int(center_y / SCALE_FACTOR)
-                                                
-                                            click_x = region[0] + center_x
-                                            click_y = region[1] + center_y
-                                            
-                                            print(f"Clicking on map '{priority_map}' at ({click_x}, {click_y})")
-                                            pyautogui.moveTo(click_x, click_y)
-                                            time.sleep(np.random.uniform(0.02, 0.03))
-                                            pyautogui.click()
-                                            
-                                            # Update state
-                                            self.checked_maps[priority_map] = now
-                                            self.current_map_name = priority_map
-                                            self.state = "WAITING_FOR_BOSS_LIST"
-                                            self.state_timer = now
-                                        except Exception as e:
-                                            print(f"Click error: {e}")
+                                        click_x = region[0] + center_x
+                                        click_y = region[1] + center_y
+                                        
+                                        print(f"Clicking on map '{priority_map}' at ({click_x}, {click_y})")
+                                        pyautogui.moveTo(click_x, click_y)
+                                        time.sleep(np.random.uniform(0.02, 0.03))
+                                        pyautogui.click()
+                                        
+                                        # Update state
+                                        self.checked_maps[priority_map] = now
+                                        self.current_map_name = priority_map
+                                        self.state = "WAITING_FOR_BOSS_LIST"
+                                        self.state_timer = now
+                                        self.current_channel = 1
+                                        self.is_initial_check = True
+                                    except Exception as e:
+                                        print(f"Click error: {e}")
                                 break
                         
                         if found_target:
@@ -578,6 +626,75 @@ class BossDetectionWorker(QThread):
                         except Exception as e:
                             print(f"Scroll logic error: {e}")
 
+                        except Exception as e:
+                            print(f"Scroll logic error: {e}")
+
+                # --- STATE: RESELECTING_MAP (Issue: UI Reset on Channel Switch) ---
+                elif self.state == "RESELECTING_MAP":
+                    # We switched channels, so the UI might have reset. We need to find and click the current map again.
+                    # We ignore priority here and look ONLY for self.current_map_name.
+                    
+                    priority_map = self.current_map_name
+                    found_target = False
+                    
+                    # 1. Template Match
+                    template_key = f"map:{priority_map}"
+                    rect, conf = self._find_with_template(processed, template_key, threshold=0.85)
+                    
+                    if rect:
+                        x, y, w, h = rect
+                        center_x = x + w // 2
+                        center_y = y + h // 2
+                        if SCALE_FACTOR != 1.0:
+                            center_x = int(center_x / SCALE_FACTOR)
+                            center_y = int(center_y / SCALE_FACTOR)
+                        click_x = region[0] + center_x
+                        click_y = region[1] + center_y
+                        
+                        print(f"Reselecting map '{priority_map}' via TEMPLATE (conf: {conf:.2f})")
+                        try:
+                            pyautogui.moveTo(click_x, click_y)
+                            time.sleep(np.random.uniform(0.02, 0.03))
+                            pyautogui.click()
+                            self.state = "WAITING_FOR_BOSS_LIST"
+                            self.state_timer = time.time()
+                            found_target = True
+                        except Exception as e:
+                            print(f"Click error: {e}")
+                            
+                    # 2. OCR Match (if template failed)
+                    if not found_target and self.latest_ocr_result:
+                        for box, text, conf in self.latest_ocr_result:
+                            # Strict match for reselection
+                            if Levenshtein.ratio(text.lower(), priority_map.lower()) > 0.8:
+                                # Click logic
+                                xs = [p[0] for p in box]
+                                ys = [p[1] for p in box]
+                                center_x = int(np.mean(xs))
+                                center_y = int(np.mean(ys))
+                                if SCALE_FACTOR != 1.0:
+                                    center_x = int(center_x / SCALE_FACTOR)
+                                    center_y = int(center_y / SCALE_FACTOR)
+                                click_x = region[0] + center_x
+                                click_y = region[1] + center_y
+                                
+                                print(f"Reselecting map '{priority_map}' via OCR")
+                                try:
+                                    pyautogui.moveTo(click_x, click_y)
+                                    time.sleep(np.random.uniform(0.02, 0.03))
+                                    pyautogui.click()
+                                    self.state = "WAITING_FOR_BOSS_LIST"
+                                    self.state_timer = time.time()
+                                    found_target = True
+                                except Exception as e:
+                                    print(f"Click error: {e}")
+                                break
+                    
+                    # Timeout
+                    if not found_target and (time.time() - self.state_timer > 5.0):
+                        print(f"Failed to reselect map '{priority_map}'. Returning to SCANNING.")
+                        self.state = "SCANNING"
+
                 # --- STATE: WAITING_FOR_BOSS_LIST ---
                 elif self.state == "WAITING_FOR_BOSS_LIST":
                     if time.time() - self.state_timer > 0.5: # Wait 500ms
@@ -590,29 +707,54 @@ class BossDetectionWorker(QThread):
                     
                     # --- FAST PATH: Template Matching for "Dostępny" ---
                     template_key = "status:dostepny"
-                    rect, conf = self._find_with_template(processed, template_key, threshold=0.85)  # Increased threshold (Issue 4)
+                    rect, conf = self._find_with_template(processed, template_key, threshold=0.90)  # Strict threshold
                     
-                    # Timer rejection (Issue 4): Verify it's not a timer
+                    # Strict verification: Ensure it's actually "Dostępny"
                     if rect:
                         x, y, w, h = rect
-                        # Extract text from detected region to verify it's not a timer
-                        text_roi = processed[y:y+h, x:x+w]
                         
-                        # Quick regex check for timer pattern (digits + 'm' or 's')
+                        # Blacklist Check
+                        if self._is_blacklisted(x, y, w, h):
+                            print(f"Skipping blacklisted boss at ({x}, {y})")
+                            rect = None
+                        else:
+                            # Extract text from detected region for verification
+                            text_roi = processed[y:y+h, x:x+w]
+                        
                         import re
-                        is_timer = False
+                        is_valid = False
                         try:
                             ocr_check, _ = self.ocr(text_roi)
                             if ocr_check and len(ocr_check) > 0:
-                                detected_text = ocr_check[0][1]
+                                detected_text = ocr_check[0][1].lower().strip()
+                                
+                                # Reject timers (digits + m/s/:)
                                 if re.search(r'\d+[ms:]', detected_text):
                                     print(f"Rejected timer text: {detected_text}")
-                                    is_timer = True
-                                    rect = None  # Reject this match
+                                    rect = None
+                                # Strict verification: Must be "Dostępny"
+                                # We do NOT use a rejection list anymore, just strict positive matching.
+                                
+                                # 1. Exact match (ignoring case/whitespace)
+                                if detected_text == "dostępny":
+                                    is_valid = True
+                                    
+                                # 2. High Levenshtein ratio (> 0.85)
+                                elif Levenshtein.ratio(detected_text, "dostępny") > 0.85:
+                                    is_valid = True
+                                    
+                                # 3. Contains "dostępny" (e.g. "status: dostępny")
+                                elif "dostępny" in detected_text:
+                                    is_valid = True
+                                    
+                                else:
+                                    print(f"Rejected text (not 'Dostępny'): {detected_text}")
+                                    rect = None
                         except:
-                            pass  # If OCR fails, trust template match
+                            # If OCR fails, reject the match for safety
+                            rect = None
                         
-                        if not is_timer:
+                        if rect:  # Only proceed if verification passed
                             # Calculate click position (Right edge + 20px)
                             target_x = int(x + w + 20)
                             target_y = int(y + h // 2)
@@ -648,7 +790,18 @@ class BossDetectionWorker(QThread):
                         found_boss = False
                         for box, text, conf in self.latest_ocr_result:
                             # Check for "Dostępny"
-                            if "stępn" in text.lower() or Levenshtein.ratio(text.lower(), "dostępny") > 0.7:
+                            # Strict matching: must be very similar to "dostępny"
+                            text_lower = text.lower().strip()
+                            
+                            is_match = False
+                            if text_lower == "dostępny":
+                                is_match = True
+                            elif Levenshtein.ratio(text_lower, "dostępny") > 0.85:
+                                is_match = True
+                            elif "dostępny" in text_lower:
+                                is_match = True
+                            
+                            if is_match:
                                 try:
                                     # Calculate click position (Right edge + 20px)
                                     # box is [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
@@ -657,6 +810,13 @@ class BossDetectionWorker(QThread):
                                     
                                     min_x, max_x = min(xs), max(xs)
                                     min_y, max_y = min(ys), max(ys)
+                                    w = max_x - min_x
+                                    h = max_y - min_y
+                                    
+                                    # Blacklist Check
+                                    if self._is_blacklisted(min_x, min_y, w, h):
+                                        print(f"Skipping blacklisted boss (OCR) at ({min_x}, {min_y})")
+                                        continue
                                     
                                     center_y = int(np.mean(ys))
                                     
@@ -710,20 +870,67 @@ class BossDetectionWorker(QThread):
                             if time.time() - self.state_timer > 2.0:
                                 print(f"No available bosses found on {self.current_map_name} (Channel {self.current_channel})")
                                 
+                                # If this was the initial check (unknown channel), start the real loop from Channel 1
+                                if self.is_initial_check:
+                                    print(f"Initial check complete. Starting full channel loop from Channel 1.")
+                                    self.is_initial_check = False
+                                    self.current_channel = 1
+                                    self.state = "CHANGING_CHANNEL"
+                                    self.state_timer = time.time()
+                                
                                 # Check if we have more channels to check for this map
-                                if self.current_channel < self.num_channels:
+                                elif self.current_channel < self.num_channels:
                                     self.state = "CHANGING_CHANNEL"
                                     self.current_channel += 1
                                     self.state_timer = time.time()
                                 else:
-                                    # All channels checked for this map, move to next map
-                                    print(f"Finished checking all channels for {self.current_map_name}. Returning to Map Scan.")
-                                    self.current_channel = 1 # Reset for next map
-                                    self.ocr_disabled_until_cycle_end = False  # Re-enable OCR (Issue 3)
-                                    self.state = "SCANNING"
+                                    # All channels checked for this map
+                                    if len(self.map_priority) == 1:
+                                        # Single map mode: Cycle back to Channel 1 immediately without re-scanning map
+                                        print(f"Single map mode: Cycling back to Channel 1 for {self.current_map_name}")
+                                        self.current_channel = 1
+                                        self.state = "CHANGING_CHANNEL"
+                                        self.state_timer = time.time()
+                                    else:
+                                        # Multiple maps: Move to next map
+                                        print(f"Finished checking all channels for {self.current_map_name}. Returning to Map Scan.")
+                                        # Mark this map as checked so we skip it in the next scan
+                                        self.checked_maps[self.current_map_name] = time.time()
+                                        self.current_channel = 1 # Reset for next map
+                                        self.ocr_disabled_until_cycle_end = False  # Re-enable OCR (Issue 3)
+                                        self.state = "SCANNING"
 
                 # --- STATE: MONITORING_BOSS ---
                 elif self.state == "MONITORING_BOSS":
+                    
+                    # --- STUCK BOSS CHECK ---
+                    if self.ignore_stuck and (time.time() - self.state_timer > self.stuck_timeout):
+                        print(f"Boss timeout ({self.stuck_timeout}s)! Blacklisting and moving on.")
+                        
+                        # Add to blacklist
+                        if self.locked_boss_roi:
+                            # Key: (map, channel, x, y)
+                            # We use approximate coordinates (rounded to nearest 10px) to handle slight shifts
+                            cx = int((self.locked_boss_roi["min_x"] + self.locked_boss_roi["max_x"]) / 2)
+                            cy = int((self.locked_boss_roi["min_y"] + self.locked_boss_roi["max_y"]) / 2)
+                            key = (self.current_map_name, self.current_channel, cx // 10, cy // 10)
+                            self.boss_blacklist[key] = time.time()
+                            print(f"Blacklisted boss at {key}")
+
+                        # Release spacebar
+                        if self.space_held:
+                            try:
+                                self.keyboard.release(Key.space)
+                                self.space_held = False
+                            except:
+                                pass
+                        
+                        # Return to checking
+                        self.state = "CHECKING_BOSSES"
+                        self.state_timer = time.time()
+                        self.locked_boss_roi = None
+                        continue
+
                     # --- PELERYNKA & SPACEBAR LOGIC ---
                     if not self.space_held:
                         print(f"Boss locked. Pressing {self.pelerynka_key} and holding Space.")
@@ -833,31 +1040,50 @@ class BossDetectionWorker(QThread):
                 elif self.state == "CHANGING_CHANNEL":
                     print(f"Switching to channel {self.current_channel}...")
                     try:
-                        # Press ESC to close summon window/ensure focus
-                        pyautogui.press('esc')
-                        time.sleep(0.3)
+                        # Check if we have a hotkey for this channel
+                        hotkey = self.channel_hotkeys.get(str(self.current_channel))
                         
-                        # Open chat
-                        pyautogui.press('enter')
-                        time.sleep(0.2)
-                        
-                        # Type channel command
-                        command = f"/ch {self.current_channel}"
-                        pyautogui.write(command)
-                        time.sleep(0.2)
-                        
-                        # Send command
-                        pyautogui.press('enter')
-                        print(f"Sent command: {command}")
+                        if hotkey:
+                            # Use Hotkey
+                            print(f"Using hotkey '{hotkey}' for channel {self.current_channel}")
+                            
+                            # Resolve key
+                            raw_key = str(hotkey).lower().strip()
+                            p_key = self.key_map.get(raw_key, raw_key)
+                            
+                            # Press key
+                            self.keyboard.press(p_key)
+                            time.sleep(0.1)
+                            self.keyboard.release(p_key)
+                            
+                        else:
+                            # Use Chat Command
+                            # Press ESC to close summon window/ensure focus
+                            pyautogui.press('esc')
+                            time.sleep(0.3)
+                            
+                            # Open chat
+                            pyautogui.press('enter')
+                            time.sleep(0.2)
+                            
+                            # Type channel command
+                            command = f"/ch {self.current_channel}"
+                            pyautogui.write(command)
+                            time.sleep(0.2)
+                            
+                            # Send command
+                            pyautogui.press('enter')
+                            print(f"Sent command: {command}")
                         
                         # Wait for channel switch (usually takes a moment)
                         time.sleep(3.0)
                         
                         print(f"Switched to channel {self.current_channel}")
                         
-                        # Return to WAITING_FOR_BOSS_LIST to reopen the boss list
-                        # (Assuming the map/boss list needs to be refreshed or reopened)
-                        self.state = "WAITING_FOR_BOSS_LIST"
+                        print(f"Switched to channel {self.current_channel}")
+                        
+                        # Return to RESELECTING_MAP to ensure the map is selected in the UI
+                        self.state = "RESELECTING_MAP"
                         self.state_timer = time.time()
                         
                     except Exception as e:
@@ -1083,7 +1309,9 @@ class BossDetectionWorker(QThread):
         
         with self.template_lock:
             # Clear status templates (most likely to become stale)
-            keys_to_clear = [k for k in self.dynamic_templates.keys() if k.startswith("status:")]
+            # Clear status templates (most likely to become stale)
+            # User request: Don't clear "status:dostepny" as it is static
+            keys_to_clear = [k for k in self.dynamic_templates.keys() if k.startswith("status:") and "dostepny" not in k]
             for k in keys_to_clear:
                 del self.dynamic_templates[k]
             

@@ -31,7 +31,7 @@ class BossFarmingManager(QObject):
         self.hotkey_listener = None
         # Template persistence is now handled by worker (Issue 8)
 
-    def start_boss_farming(self, priority_list=None, click_enabled=False, num_channels=1, ocr_backend="CPU", pelerynka_key="F1", show_preview=True) -> Optional[Any]:
+    def start_boss_farming(self, priority_list=None, click_enabled=True, num_channels=1, ocr_backend="CPU", pelerynka_key="F1", show_preview=True, channel_hotkeys=None, ignore_stuck=True, stuck_timeout=30) -> Optional[Any]:
         from gui.controllers.teleporter_tab_worker import BossDetectionWorker
         config = {}
         if priority_list:
@@ -41,6 +41,9 @@ class BossFarmingManager(QObject):
         config["ocr_backend"] = ocr_backend
         config["pelerynka_key"] = pelerynka_key
         config["show_preview"] = show_preview
+        config["channel_hotkeys"] = channel_hotkeys or {}
+        config["ignore_stuck"] = ignore_stuck
+        config["stuck_timeout"] = stuck_timeout
         # Note: Worker handles template loading from disk automatically
             
         self.boss_worker = BossDetectionWorker(config)
