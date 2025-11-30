@@ -2,9 +2,12 @@ import sys
 import os
 import requests
 import subprocess
-from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel, 
+from pathlib import Path
+from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel,
                                QProgressBar, QPushButton, QMessageBox)
 from PySide6.QtCore import QThread, Signal, Qt
+
+from utils.temp_dir import initialize_temp_dir
 
 
 
@@ -13,6 +16,9 @@ GITHUB_API_URL = "https://api.github.com/repos/maciejkondev/TroyanEyes/releases"
 TARGET_DIR = "."
 REQUIRED_FILES = ["TroyanEyes.exe", "TEPatcher.exe", "summon_window.pt", "boss_detector.pt"]
 CURRENT_EXE = os.path.basename(sys.argv[0]).lower()
+
+# Ensure a single, stable temp directory is used across runs
+TEMP_DIR = initialize_temp_dir()
 
 class DownloadWorker(QThread):
     progress = Signal(str, int)  # current_file, percent
@@ -178,6 +184,7 @@ class PatcherWindow(QWidget):
         self.init_ui()
         self.cleanup_old_files()
         self.worker = None
+        self.update_launch_button_state()
 
     def cleanup_old_files(self):
         """Try to remove .old files from previous updates"""
@@ -213,6 +220,11 @@ class PatcherWindow(QWidget):
         self.btn_start.clicked.connect(self.start_patching)
         layout.addWidget(self.btn_start)
 
+        self.btn_launch = QPushButton("Start TroyanEyes")
+        self.btn_launch.setMinimumHeight(36)
+        self.btn_launch.clicked.connect(self.start_troyaneyes)
+        layout.addWidget(self.btn_launch)
+
         self.lbl_log = QLabel("")
         self.lbl_log.setStyleSheet("color: gray; font-size: 11px;")
         self.lbl_log.setAlignment(Qt.AlignCenter)
@@ -222,6 +234,7 @@ class PatcherWindow(QWidget):
 
     def start_patching(self):
         self.btn_start.setEnabled(False)
+        self.btn_launch.setEnabled(False)
         self.pbar.setValue(0)
         self.lbl_version.setText("Checking version...")
         
@@ -254,6 +267,7 @@ class PatcherWindow(QWidget):
         self.btn_start.setEnabled(True)
         self.lbl_status.setText("Up to date.")
         self.pbar.setValue(100)
+        self.update_launch_button_state()
         
     def handle_restart(self):
         self.lbl_status.setText("Restarting...")
@@ -263,6 +277,23 @@ class PatcherWindow(QWidget):
             sys.exit(0)
         except Exception as e:
             QMessageBox.critical(self, "Restart Error", f"Failed to restart:\n{e}")
+
+    def update_launch_button_state(self):
+        exe_path = Path(TARGET_DIR) / "TroyanEyes.exe"
+        self.btn_launch.setEnabled(exe_path.exists())
+
+    def start_troyaneyes(self):
+        exe_path = Path(TARGET_DIR) / "TroyanEyes.exe"
+        if not exe_path.exists():
+            QMessageBox.warning(self, "Missing executable", "TroyanEyes.exe was not found in the current directory.")
+            self.btn_launch.setEnabled(False)
+            return
+
+        try:
+            subprocess.Popen([str(exe_path)], cwd=TARGET_DIR)
+            self.lbl_status.setText("Launched TroyanEyes.")
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Failed to start TroyanEyes.exe:\n{e}")
 
 if __name__ == "__main__":
     

@@ -2,6 +2,7 @@
 
 import sys
 import os
+from pathlib import Path
 
 # Suppress Qt DPI awareness warning/error
 # os.environ["QT_QPA_PLATFORM"] = "windows:dpiawareness=1"
@@ -9,11 +10,17 @@ import os
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
+from utils.temp_dir import initialize_temp_dir
+
 # Ensure PyInstaller can find modules if the app is bundled as an executable
 if getattr(sys, 'frozen', False):
-    # Add bundled paths to sys.path
+    # Add bundled paths to sys.path and keep temporary extraction stable
     base_path = sys._MEIPASS
     sys.path.append(base_path)
+
+# Ensure a single, stable temp directory is used across runs
+TEMP_DIR = initialize_temp_dir()
+os.environ.setdefault("PYTHONPYCACHEPREFIX", str(Path(TEMP_DIR) / "__pycache__"))
 
 def main():
     app = QApplication(sys.argv)
