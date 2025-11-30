@@ -29,7 +29,7 @@ class BossFarmingManager(QObject):
         self.config_manager = BossFarmingConfig()
         self.boss_worker = None
         self.hotkey_listener = None
-        self.cached_templates = {}
+        # Template persistence is now handled by worker (Issue 8)
 
     def start_boss_farming(self, priority_list=None, click_enabled=False, num_channels=1, ocr_backend="CPU", pelerynka_key="F1", show_preview=True) -> Optional[Any]:
         from gui.controllers.teleporter_tab_worker import BossDetectionWorker
@@ -41,7 +41,7 @@ class BossFarmingManager(QObject):
         config["ocr_backend"] = ocr_backend
         config["pelerynka_key"] = pelerynka_key
         config["show_preview"] = show_preview
-        config["initial_templates"] = self.cached_templates
+        # Note: Worker handles template loading from disk automatically
             
         self.boss_worker = BossDetectionWorker(config)
         self.boss_worker.start()
@@ -49,20 +49,9 @@ class BossFarmingManager(QObject):
 
     def stop_boss_farming(self):
         if self.boss_worker:
-            # Save templates before stopping
-            if hasattr(self.boss_worker, 'dynamic_templates'):
-                with self.boss_worker.template_lock:
-                    self.cached_templates = self.boss_worker.dynamic_templates.copy()
-            
+            # Worker handles template persistence internally now
             self.boss_worker.stop()
             self.boss_worker = None
-            
-    def clear_templates(self):
-        """Manually clear cached templates."""
-        self.cached_templates = {}
-        if self.boss_worker:
-            with self.boss_worker.template_lock:
-                self.boss_worker.dynamic_templates = {}
 
     def pause_boss_farming(self):
         if self.boss_worker:

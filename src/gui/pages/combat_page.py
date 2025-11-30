@@ -359,15 +359,18 @@ class TeleporterTab(QWidget):
             x, y, w, h = r
             template = screenshot[y:y+h, x:x+w]
 
-            template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "templates"))
+            # Save to current directory for persistence (Issue 7)
+            template_dir = os.path.join(os.getcwd(), "data", "templates")
             os.makedirs(template_dir, exist_ok=True)
 
-            cv2.imwrite(os.path.join(template_dir, "scroll_icon.png"), template)
+            # Save as user-calibrated version
+            cv2.imwrite(os.path.join(template_dir, "scroll_icon_user.png"), template)
 
+            # Also save position for reference
             with open(os.path.join(template_dir, "scroll_icon_pos.json"), "w") as f:
                 json.dump({"x": x, "y": y, "w": w, "h": h}, f)
 
-            QMessageBox.information(self, "Success", "Scroll icon saved.")
+            QMessageBox.information(self, "Success", "Scroll icon saved (persisted).")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to setup scroll icon:\n{e}")

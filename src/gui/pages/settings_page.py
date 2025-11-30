@@ -183,11 +183,55 @@ class SettingsPage(QWidget):
 
         card_layout.addLayout(hotkey_layout)
 
+        # --- Channel Hotkeys ---
+        channel_label = QLabel("Channel Switching Hotkeys:")
+        channel_label.setStyleSheet("color: #cccccc; font-size: 14px; margin-top: 10px;")
+        card_layout.addWidget(channel_label)
+
+        self.channel_inputs = {}
+        channels_layout = QVBoxLayout()
+        
+        # Create inputs for Channels 1-6
+        # Using a grid for better layout
+        from PySide6.QtWidgets import QGridLayout
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        
+        for i in range(1, 7):
+            lbl = QLabel(f"Channel {i}:")
+            lbl.setStyleSheet("color: #aaaaaa;")
+            
+            inp = QLineEdit()
+            inp.setPlaceholderText(f"e.g. F{i+4}") # Example default
+            inp.setStyleSheet("""
+                QLineEdit {
+                    background: #2b2b2b;
+                    color: white;
+                    padding: 5px 8px;
+                    border-radius: 4px;
+                    border: none;
+                }
+                QLineEdit:focus {
+                    background: #333333;
+                }
+            """)
+            self.channel_inputs[str(i)] = inp
+            
+            row = (i-1) // 2
+            col = (i-1) % 2 * 2 # 0 or 2
+            
+            grid.addWidget(lbl, row, col)
+            grid.addWidget(inp, row, col + 1)
+            
+        channels_layout.addLayout(grid)
+        card_layout.addLayout(channels_layout)
+
         # --- Info ---
         info_label = QLabel(
             "Set a global hotkey to stop all bot functions immediately.\n"
             "Format: key or modifier+key (e.g., F9, ctrl+shift+q)\n"
-            "Modifiers: ctrl, shift, alt"
+            "Modifiers: ctrl, shift, alt\n\n"
+            "Channel Hotkeys: Leave empty to use default chat command (/ch X)."
         )
         info_label.setStyleSheet("color: #888888; font-size: 11px;")
         info_label.setAlignment(Qt.AlignLeft)
@@ -244,8 +288,10 @@ class SettingsPage(QWidget):
 
     def get_settings(self):
         """Return settings for profile saving."""
+        channel_hotkeys = {k: v.text() for k, v in self.channel_inputs.items()}
         return {
-            "emergency_hotkey": self.hotkey_input.text()
+            "emergency_hotkey": self.hotkey_input.text(),
+            "channel_hotkeys": channel_hotkeys
         }
 
     def load_settings(self, data):
@@ -253,3 +299,8 @@ class SettingsPage(QWidget):
         hotkey = data.get("emergency_hotkey", "F9")
         self.hotkey_input.setText(hotkey)
         self.apply_hotkey()
+        
+        channel_hotkeys = data.get("channel_hotkeys", {})
+        for k, v in channel_hotkeys.items():
+            if k in self.channel_inputs:
+                self.channel_inputs[k].setText(v)
